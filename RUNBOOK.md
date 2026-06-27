@@ -59,10 +59,26 @@ micromamba run -n rr pip install --force-reinstall torch torchvision \
 python -m src.phase1.train --config config/phase1/config_gpu.yaml
 ```
 
-## 8. Phase II — graph (once `src/phase2/graph` exists)
+## 8. Export pred_mask.tif (Phase 1 → 2 contract)
+```bash
+python -m src.phase1.predict --ckpt runs/train/<ts>/best.pt --out data/pred_mask.tif
+# --binary for 0/1 instead of probability
+```
+Writes a georeferenced full-scene road-probability GeoTIFF (model + norm read from the checkpoint).
+
+## 9. Phase 2 — graph (config-driven; clean CLI)
 ```bash
 python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
 ```
+All options live in `config/phase2/config_phase2.yaml → graph`:
+- **input** — `mask:` a GeoTIFF (e.g. `data/pred_mask.tif`, or a saved `osm_mask.tif`),
+  or `null` to auto-build an OSM mask.
+- **mode** — `tiling.enabled: true` (default) processes the **whole scene in blocks**
+  (the global heal stitches the seams); set `false` + `window: [row,col,h,w]` for one region.
+- **de-noise a model mask** — raise `min_object_size` / `threshold`.
+
+→ `runs/graph/<ts>/`: `graph.graphml` (Phase 3 input), `roads.geojson` (QGIS),
+`metrics.csv` (Connectivity Ratio), and a healing overlay (window/single mode).
 
 ---
 

@@ -10,15 +10,23 @@ network analysis), connected by a single artifact (`pred_mask.tif`).
 
 ## Methodology (overview)
 ```
-LISS-IV G/R/NIR + AOI
-   └─ ingest: NDVI · canopy=NDVI>thr · OSM roads → rasterised mask · tile
-        └─ segmentation model (smp ResNet baseline → SegFormer/Transformer advanced)
-             loss = BCE + Dice + clDice (+ optional canopy-weighting)
-             metric = Occlusion-Recall (recall on canopy-occluded roads)
-                └─ export → pred_mask.tif (georeferenced)
-                     └─ PHASE 2: skeletonize → graph (sknw/NetworkX) → heal
-                          (Union-Find + MST, distance×angle) → weighted graph
-                               └─ criticality (betweenness) → resilience index
+  INPUTS:  LISS-IV G/R/NIR  ·  OSM roads  ·  AOI
+
+  ┌──────────────── PHASE 1 — perception ─────────────────┐
+  │ ingest → tiles → train → best.pt → predict            │
+  │ [G/R/NIR→NDVI, OSM→mask]   [smp UNet++ / SegFormer]    │
+  │ loss BCE+Dice+clDice  →  Occlusion-Recall             │
+  └───────────────────────┬───────────────────────────────┘
+                          ▼  pred_mask.tif (georeferenced)  ◄ the contract
+  ┌──────────────── PHASE 2 — graph ──────────────────────┐
+  │ read → clean → skeletonize → build graph (sknw)       │
+  │ [ tiled over the whole city ] → georeference          │
+  │ → HEAL (Union-Find + MST) → weight → graph.graphml    │
+  └───────────────────────┬───────────────────────────────┘
+                          ▼
+  ┌──────────────── PHASE 3 / 4 — resilience (next) ──────┐
+  │ betweenness → Resilience Index → dashboard            │
+  └────────────────────────────────────────────────────────┘
 ```
 - **Occlusion** is handled by **context-aware deep learning** (Transformer attention
   infers road continuity across gaps) + occlusion augmentation + a connectivity
@@ -62,15 +70,17 @@ config/
 src/
   common/   runtime (device/seed/amp) · config (extends loader) · viz (figures)
   phase1/   train.py · data/ · preprocess/ (ingest_liss4) · models/ · losses/ · metrics/ · eda/
-  phase2/   graph/  (mask → skeleton → graph → heal)   ← in progress
+  phase2/   graph/  (tiled mask → skeleton → graph → heal → export)
 data/raw/liss4/  data/raw/aoi/  data/tiles/   (gitignored)
 runs/   (gitignored)
 METHODOLOGY.md · RUNBOOK.md · REFERENCES.md · CONTRIBUTING.md
 ```
 
 ## Status
-- ✅ Step 1 ingest (OSM labels) + segmentation baseline trained on real data.
-- ⬜ Next: spatial-block CV, LR schedule + more epochs, DeepGlobe pretrain, SegFormer,
-  `pred_mask.tif` export (Phase 1→2 contract), Phase 2 `src/phase2/graph/`.
+- ✅ **Phase 1** — ingest (OSM labels) + baseline trained (Occlusion-Recall ≈ 0.39).
+- ✅ **Export** `pred_mask.tif` (`src/phase1/predict.py`) — the Phase 1→2 contract.
+- ✅ **Phase 2** — tiled mask → graph → heal → export (`src/phase2/graph/`).
+- ⬜ **Next** — improve the model (more epochs, SegFormer, DeepGlobe pretrain) so its
+  mask is vectorizable; then **Phase 3** (betweenness → Resilience Index) + **Phase 4** dashboard.
 
 See [`METHODOLOGY.md`](METHODOLOGY.md) and [`RUNBOOK.md`](RUNBOOK.md).

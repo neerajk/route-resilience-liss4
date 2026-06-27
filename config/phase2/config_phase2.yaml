@@ -1,8 +1,6 @@
 # =============================================================================
-# rr — Phase II (graph) config. STANDALONE (Phase II is decoupled from Phase I —
-# it only reads a mask GeoTIFF). YOU own this file.
-# Run (once src/phase2/graph exists):
-#   python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
+# rr — Phase 2 (graph) config. STANDALONE; YOU own it. All options live here —
+# the CLI is just:  python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
 # =============================================================================
 project:
   name: rr-phase2
@@ -12,22 +10,36 @@ paths:
   runs: runs
 
 graph:
-  # ---- input mask (the contract) ----
-  # Use the OSM mask now; swap to the model's pred_mask.tif at integration.
-  mask: null               # path to pred_mask.tif OR an OSM-rasterized mask GeoTIFF
-  threshold: 0.5           # binarize probability masks at this value
+  # ---- INPUT: choose one --------------------------------------------------- #
+  # (1) point at a mask GeoTIFF (model output OR a previously-built OSM mask):
+  mask: null                 # e.g. data/pred_mask.tif  OR  runs/graph/<ts>/osm_mask.tif
+  # (2) ...or leave mask: null to AUTO-BUILD an OSM mask on this grid (dev):
+  make_mask:
+    ref_raster: data/raw/liss4/B2.tif       # any GeoTIFF on the target grid (CRS+transform)
+    aoi: data/raw/aoi/bangalore_urban.shp   # null => use raster bounds
+    network_type: drive
+    buffer_m: 4.0
 
-  # ---- clean-up before skeletonization ----
-  min_object_size: 50      # drop specks smaller than this (px) -> fewer fake nodes
-  closing_radius: 2        # close 1-2 px gaps before skeletonizing
+  # ---- PROCESSING MODE: sknw can't do the full city scene at once. Pick one - #
+  tiling:
+    enabled: true            # TRUE (recommended): process the WHOLE scene in blocks
+    block_size: 2048         # px per block (1024-4096; smaller = safer, slower)
+  window: null               # used only if tiling.enabled: false -> ONE sub-region
+  #                            [row, col, height, width], e.g. [5000, 4500, 2048, 2048]
+  #                            (null + tiling off = full single pass; only for small masks)
 
-  # ---- topological healing (Union-Find + MST, distance x angle) ----
+  # ---- CLEANING (before skeletonize) -------------------------------------- #
+  threshold: 0.5             # binarize probability masks
+  min_object_size: 50        # drop blobs <= this many px (raise to de-noise a model mask)
+  closing_radius: 2          # close 1-2 px gaps
+  max_road_frac: 0.05        # warn if a full single-pass mask is denser than this
+
+  # ---- HEALING (Union-Find + MST; also stitches tile seams) --------------- #
   heal:
-    max_gap_m: 60          # only bridge endpoints within this distance (metres)
-    max_angle_deg: 30      # reject bridges that bend more than this (natural trajectory)
-    angle_penalty: 1.0     # cost = dist * (1 + angle_penalty * angle_frac)
+    max_gap_m: 60            # bridge endpoints within this distance (m)
+    max_angle_deg: 30        # reject bridges bending more than this
+    angle_penalty: 1.0       # cost = dist * (1 + angle_penalty * angle_frac)
 
-  # ---- weighting ----
-  speed_kph_default: 30    # for model-derived edges (no OSM road class)
-
+  # ---- WEIGHTING / OUTPUT -------------------------------------------------- #
+  speed_kph_default: 30      # for model-derived edges (no OSM road class)
   out_dir: runs/graph
