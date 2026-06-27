@@ -1,0 +1,15 @@
+{
+  "// note": "Point this at your micromamba env python. Find it: micromamba run -n rr which python",
+  "python.defaultInterpreterPath": "~/micromamba/envs/rr/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "terminal.integrated.env.osx": {
+    "PYTORCH_ENABLE_MPS_FALLBACK": "1"
+  },
+  "terminal.integrated.env.linux": {
+    "PYTORCH_ENABLE_MPS_FALLBACK": "1"
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  }
+}

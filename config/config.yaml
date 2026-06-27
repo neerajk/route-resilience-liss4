@@ -1,0 +1,224 @@
+# =============================================================================
+# rr — Route-Resilience Phase I configuration
+# -----------------------------------------------------------------------------
+# Single source of truth. Mac (MPS) / NVIDIA (CUDA) / cloud differ ONLY by values
+# in this file. Search "USER INPUT" for the lines you must fill before REAL data.
+# Engineering rules: config-driven, device-dynamic, graceful degradation.
+# =============================================================================
+
+project:
+  name: rr-phase1
+  task: occlusion-robust-road-extraction
+
+runtime:
+  device: auto        # auto | mps | cuda | cpu   (auto = CUDA->MPS->CPU)
+  seed: 42
+
+paths:
+  runs: runs          # all artifacts (training, EDA, OCOI) written under here
+
+# -----------------------------------------------------------------------------
+# SENSOR — LISS-IV facts (cite NRSC Resourcesat-2 Data Users Handbook, 2011).
+# Numbers are config-driven, never hardcoded in code.  >>> USER INPUT: confirm
+# against your actual product metadata.
+# -----------------------------------------------------------------------------
+sensor:
+  name: LISS-IV
+  platform: Resourcesat-2/2A
+  gsd_m: 5.8
+  bands: [B2_green, B3_red, B4_nir]   # NO blue, NO SWIR
+  wavelengths_um: [0.56, 0.65, 0.81]  # band centres G/R/NIR (for Clay/DOFA)
+  radiometric_bits: 10                # 1024 DN levels (R2); confirm for R2A
+  epsg: 32643                         # UTM 43N (Bengaluru)
+
+data:
+  # ---- source selector --------------------------------------------------- #
+  source: tiles   # synthetic | tiles
+  #   synthetic -> runs anywhere, no data/keys (DEV/CI default).
+  #   tiles     -> reads pre-tiled real .npz from `root`.
+
+  channels: [green, red, nir, ndvi]   # PS-minimal 4-ch (CHM dropped); keep model.in_channels in sync
+  tile_size: 256
+
+  # ---- synthetic fixture knobs (source: synthetic) ----------------------- #
+  synthetic:
+    canopy_fraction: 0.35   # fraction of tile under occluding canopy
+    n_roads: 9              # straight road segments per tile
+    road_width: 1           # px; 1 => ~1.7% road pixels (realistic imbalance)
+  eda_samples: 48
+  train_samples: 64
+  val_samples: 16
+
+  # ---- normalization (applied AFTER augment, in dataset) ----------------- #
+  # Synthetic tiles are already in [0,1] => leave null (no-op). For REAL LISS-IV
+  # 10-bit DN you MUST set per-channel mean/std (run EDA band_statistics first).
+  norm:
+    # >>> USER INPUT (real data): per-channel [green,red,nir,ndvi,chm]
+    mean: null            # e.g. [128.0, 110.0, 320.0, 0.2, 4.0]
+    std:  null            # e.g. [ 60.0,  55.0, 140.0, 0.3, 6.0]
+
+  # ---- spatial-block cross-validation (Roberts et al. 2017) -------------- #
+  # Random tile splits LEAK in a single contiguous AOI => inflated metrics.
+  cv:
+    scheme: spatial_block   # spatial_block | random
+    block_size_m: 1500      # ~1-2 km blocks; whole blocks go to one fold
+    n_folds: 5
+    val_fraction: 0.2       # used when scheme: random or for a single split
+
+  # ---- REAL data (source: tiles) ---------------------------------------- #
+  # Point at the .npz tiles produced by ingest_liss4 (below). >>> USER INPUT <<<
+  root: data/tiles
+
+  # ---- LISS-IV ingestion (src/preprocess/ingest_liss4.py) --------------- #
+  # Drop your band GeoTIFFs and run:
+  #   python -m src.preprocess.ingest_liss4 --config config/config.yaml
+  liss4:
+    # LISS-IV bands (B2/B3/B4 = G/R/NIR) — three single-band files OR one stack.
+    green: data/raw/liss4/B2.tif
+    red:   data/raw/liss4/B3.tif
+    nir:   data/raw/liss4/B4.tif
+    stack: null                          # OR one 3-band file; then green/red/nir null
+    # ---- labels (Step 1): OSM auto-rasterized = ground-truth road mask ----
+    labels: osm                          # osm | none
+    aoi: data/raw/aoi/bangalore_urban.shp  # clips + defines OSM fetch area (null => use image bounds)
+    network_type: drive                  # osmnx road class
+    buffer_m: 4.0                        # road half-width (~1 px at 5.8 m; 3-6 m)
+    # ---- optional occlusion prior (PS-minimal: CHM dropped, NDVI proxy) ----
+    chm:   null                          # optional CHM GeoTIFF; null => canopy from NDVI only
+    ndvi_thresh: 0.3                     # NDVI > thresh => vegetation (occlusion proxy)
+    canopy_height_thresh: 3.0            # used only if chm provided
+    # ---- tiling ----
+    nodata: 0           # nodata DN to mask (null => read from the tif)
+    tile_size: 256
+    stride: 256         # < tile_size => overlapping tiles (more samples)
+    min_valid_frac: 0.5 # skip tiles with fewer valid (non-nodata) pixels
+    out_dir: data/tiles
+    stats_csv: data/band_statistics.csv
+
+model:
+  arch: smp           # miniunet (dep-free dev) | smp (BASELINE/ADVANCED) | dinov3 (optional)
+  in_channels: 4      # MUST equal len(data.channels) = [G,R,NIR,NDVI]
+  classes: 1
+  base: 32            # miniunet width
+  center: none        # none | dblock   (D-LinkNet dilation-1/2/4/8 center, bridges canopy gaps)
+
+  # ---- input-stem adaptation for the G/R/NIR + NDVI/CHM mismatch --------- #
+  # RGB-pretrained encoders expect 3 channels. 'inflate' copies pretrained RGB
+  # conv1 weights onto G/R/NIR and mean-inits NDVI/CHM (Carreira & Zisserman 2017,
+  # I3D inflation), rescaled by 3/in_channels — beats smp's default random re-init.
+  stem_init: inflate  # inflate | smp_default
+
+  # ---- smp (used when arch: smp) ---
+  # BASELINE: decoder=unetplusplus, encoder=resnet34 (PS "U-Net + ResNet")
+  # ADVANCED: decoder=segformer (or unetplusplus), encoder=mit_b2 (Transformer/attention)
+  decoder: unetplusplus       # unetplusplus | unet | deeplabv3plus | linknet | segformer
+  encoder: resnet34           # resnet34 (baseline) | mit_b2 (SegFormer/Transformer) | efficientnet-b0
+  encoder_weights: imagenet   # imagenet | swsl | ssl | null
+
+  # ---- DINOv3 hero (used when arch: dinov3) — STRETCH path ---
+  dinov3:
+    # NON-GATED satellite backbone via timm (no huggingface-cli login needed),
+    # SAT-493M pretrained on 0.6 m Maxar RGB. Resolves DINOv3 GitHub issue #61.
+    timm_model: vit_large_patch16_dinov3.sat493m
+    weights_path: null        # optional local checkpoint override
+    embed_dim: 1024           # ViT-L
+    patch: 16
+    freeze: true              # frozen backbone + light head (recommended first)
+    aux_dim: 64               # width of NDVI/CHM parallel branch
+    norm:                     # SAT-493M normalization (NOT ImageNet) — verified from timm config.json
+      mean: [0.430, 0.411, 0.296]
+      std:  [0.213, 0.156, 0.143]
+
+  # ---- Clay v1.5 (used when arch: clay) — STRETCH path, best for non-RGB bands ---
+  clay:
+    repo: made-with-clay/Clay
+    checkpoint: v1.5/clay-v1.5.ckpt   # auto-downloaded via huggingface_hub
+    bands: [green, red, nir]
+    wavelengths_um: [0.56, 0.65, 0.81]
+    gsd: 5.8
+    freeze: true
+
+loss:
+  cldice_iters: 6     # 5-10; cap low to bound MPS memory (jocpae clDice issue #13)
+  weights:            # combined = bce + dice + cldice
+    bce: 0.3
+    dice: 0.4
+    cldice: 0.3
+  # Canopy-weighted BCE (your idea): penalise missing OCCLUDED roads more.
+  # effective pixel weight = 1 + canopy_weight * canopy_mask.  0 disables.
+  canopy_weight: 0.0  # try 1.0-3.0 to push Occlusion-Recall
+
+train:
+  epochs: 3           # smoke test; raise for real runs
+  batch_size: 4       # Mac/MPS: 2-4 | CUDA: 16+
+  num_workers: 0      # 0 on macOS/MPS; 4-8 on CUDA/cloud
+  lr: 0.001
+  weight_decay: 0.0001
+  amp: true           # honoured ONLY on CUDA (no-op on MPS/CPU; paired with GradScaler)
+
+eval:
+  threshold: 0.5          # probability threshold for binarizing predictions
+  relax_buffer_px: 3      # tolerance (3-5 px) for relaxed IoU / F1
+  monitor: occlusion_recall   # checkpoint selection metric (the headline number)
+
+# =============================================================================
+# Augmentation (occlusion + scale robustness). Pure-NumPy occlusion+scale run now;
+# photometric_geometric needs albumentations (skipped gracefully if absent).
+# =============================================================================
+augment:
+  enabled: false
+  occlusion:
+    enabled: true
+    p: 0.5
+  scale:
+    enabled: true
+    p: 0.4
+    range: [1.0, 2.5]
+    mtf_at_nyquist: 0.2     # LISS-IV MTF; tune to the real sensor
+  photometric_geometric:
+    enabled: true
+    p: 0.5
+
+# =============================================================================
+# DATA SOURCES — real fetchers (skeleton; need the full env + your inputs)
+# =============================================================================
+sources:
+  bhoonidhi:
+    collections: []       # >>> USER INPUT: confirm LISS-IV id (list_collections)
+    limit: 100
+  planetary:
+    max_cloud: 30
+  osm:
+    network_type: drive
+    buffer_m: 4.0         # ~1 px at 5.8 m; all_touched=True so thin roads survive
+
+# =============================================================================
+# PREPROCESSING — fetch -> reproject -> NDVI -> co-register -> OSM -> tile -> npz
+# =============================================================================
+preprocess:
+  aoi_bbox: null          # >>> USER INPUT [minlon, minlat, maxlon, maxlat]
+  project_crs: EPSG:32643
+  liss4_date_range: null
+  s2_date_range: null
+  chm_path: null
+  canopy_height_thresh: 3.0
+  tile_size: 256
+  # pretrain-on-benchmarks (close the 0.5 m -> 5.8 m resolution gap)
+  pretrain:
+    source_dataset: deepglobe   # downsample 0.5 m benchmarks to LISS-IV GSD before pretrain
+    resample_to_gsd: 5.8
+    resample: area
+  paths:
+    raw: data/raw
+    tiles: data/tiles
+
+# =============================================================================
+# MODULE A — Canopy: Treepedia-style sampling + per-segment OCOI
+# =============================================================================
+canopy:
+  interval_m: 20.0
+  chm_path: null          # >>> USER INPUT: CHM GeoTIFF from openCHm/CHMv2
+  ndvi_path: null
+  chm_thresh: 3.0
+  ndvi_thresh: 0.3
+  window: 1

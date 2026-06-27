@@ -1,0 +1,58 @@
+# =============================================================================
+# rr — micromamba environment (Apple Silicon dev / NVIDIA train)
+# -----------------------------------------------------------------------------
+# Create:   micromamba create -f environment.yml -y
+# Activate: micromamba activate rr
+#
+# RULES (verified):
+#   * gdal / rasterio / geopandas / osmnx come from conda-forge ONLY — never pip
+#     them into a conda env (binary/ABI segfaults).
+#   * ML wheels (smp, timm, albumentations) come via pip, AFTER the conda solve.
+#   * albumentations needs opencv-python-headless ONLY (never conda opencv).
+#
+# MAC (Apple Silicon): this file installs a PyTorch build with MPS support — good
+#   for dev/smoke. Nothing else to change.
+# NVIDIA GPU box: create the env, then swap in a CUDA PyTorch build, e.g.
+#     micromamba run -n rr pip install --force-reinstall torch torchvision \
+#         --index-url https://download.pytorch.org/whl/cu124
+#   (pick the cu1xx matching the box's CUDA). The geo stack is identical on both.
+# =============================================================================
+name: rr
+channels:
+  - conda-forge
+dependencies:
+  # ---- core / Python ----
+  - python=3.11
+  - numpy>=2.0           # numpy-2 safe (np.ptp fix applied in src)
+  - scipy
+  - pandas
+  - pyyaml
+  - tqdm
+  - tabulate
+  # ---- deep learning (MPS on macOS arm64; swap to CUDA build on NVIDIA, see header) ----
+  - pytorch>=2.4
+  - torchvision
+  # ---- geospatial (conda-forge binaries — DO NOT pip these) ----
+  - gdal>=3.8
+  - rasterio>=1.3
+  - geopandas
+  - shapely
+  - pyproj
+  - fiona
+  - rtree
+  - osmnx                # OSM road labels (Step 1) + Phase-II routable graph
+  - networkx             # graph (osmnx dep made explicit; Phase II/III)
+  # ---- imaging / ML utils ----
+  - scikit-image         # skeletonize (Phase II), morphology (relaxed metrics)
+  - scikit-learn         # spatial-block CV (GroupKFold)
+  - matplotlib
+  - contextily
+  - pip
+  # ---- pip-only wheels (resolved after the conda solve) ----
+  - pip:
+      - segmentation-models-pytorch>=0.4.0   # UNet++/DeepLabV3+/Linknet + SegFormer
+      - timm>=1.0.15                         # MiT/SegFormer encoders + optional DINOv3
+      - albumentations>=1.4
+      - opencv-python-headless
+      - sknw                                 # Phase-II skeleton -> graph
+      - huggingface-hub                      # optional model/weight downloads

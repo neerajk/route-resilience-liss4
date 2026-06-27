@@ -1,0 +1,41 @@
+# Minimal smoke config — dep-free miniunet path, CPU, tiny. Validates the
+# whole pipeline end-to-end (dataset -> model -> loss -> metrics -> artifacts).
+project: {name: rr-smoke, task: occlusion-robust-road-extraction}
+runtime: {device: cpu, seed: 42}
+paths: {runs: runs}
+data:
+  source: synthetic
+  channels: [green, red, nir, ndvi, chm]
+  tile_size: 64
+  synthetic: {canopy_fraction: 0.35, n_roads: 9, road_width: 1}
+  train_samples: 4
+  val_samples: 2
+  norm: {mean: null, std: null}
+  cv: {scheme: random, val_fraction: 0.2}
+model:
+  arch: miniunet
+  in_channels: 5
+  classes: 1
+  base: 16
+  center: dblock        # also exercise the D-LinkNet center block
+  stem_init: inflate
+loss:
+  cldice_iters: 4
+  weights: {bce: 0.3, dice: 0.4, cldice: 0.3}
+  canopy_weight: 1.0    # exercise the canopy-weighted BCE path
+train:
+  epochs: 1
+  batch_size: 2
+  num_workers: 0
+  lr: 0.001
+  weight_decay: 0.0001
+  amp: true
+eval:
+  threshold: 0.5
+  relax_buffer_px: 3
+  monitor: occlusion_recall
+augment:
+  enabled: true         # exercise occlusion + scale augments
+  occlusion: {enabled: true, p: 1.0}
+  scale: {enabled: true, p: 0.5, range: [1.0, 2.0]}
+  photometric_geometric: {enabled: false}

@@ -1,0 +1,24 @@
+# env / secrets
+.env
+.venv/
+micromamba/
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# data & artifacts (large; keep out of git)
+data/raw/
+data/tiles/
+data/*.tif
+data/*.ckpt
+runs/
+*.npz
+output/
+cache/
+
+# os / editor
+.DS_Store
+.vscode/*.log

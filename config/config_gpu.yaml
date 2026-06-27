@@ -1,0 +1,21 @@
+# =============================================================================
+# rr — GPU (CUDA) training config. Inherits EVERYTHING from config.yaml and
+# overrides only the machine-dependent knobs below. Run:
+#   python -m src.train --config config/config_gpu.yaml
+# (device-dynamic: runtime.device=auto picks CUDA on the GPU box automatically.)
+# =============================================================================
+extends: config.yaml      # single source of truth = config.yaml
+
+runtime:
+  device: auto            # auto -> CUDA on the GPU box
+
+train:
+  epochs: 60              # real run (raise as needed)
+  batch_size: 24          # GPU memory permitting (16-32)
+  num_workers: 8          # 4-8 on CUDA/cloud
+  amp: true               # mixed precision + GradScaler (CUDA only)
+  lr: 0.001
+  weight_decay: 0.0001
+
+loss:
+  cldice_iters: 10        # GPU has memory; full topology term
