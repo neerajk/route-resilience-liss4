@@ -1,157 +1,122 @@
-# RR Pipeline — Phase I Methodology
+# rr — Methodology
 
-**Occlusion-robust road extraction from medium-resolution LISS-IV imagery.**
-Target: InGARSS 2026 + ISRO hackathon. This document is the step-by-step
-methodology for the `rr` Phase-I pipeline (the `src/` code). Citations in
-[`REFERENCES.md`](REFERENCES.md).
+**Occlusion-robust road extraction from LISS-IV → routable graph → resilience.**
+Step-by-step methodology. Citations in [`REFERENCES.md`](REFERENCES.md); run steps
+in [`RUNBOOK.md`](RUNBOOK.md).
 
 ---
 
-## 0. Framing
+## 0. Framing & key decisions
 
-Per-pixel **binary road segmentation** from Resourcesat-2/2A **LISS-IV** (5.8 m
-GSD; 3 bands B2/B3/B4 = Green/Red/NIR; **no Blue, no SWIR**) where roads are often
-hidden under **tree canopy**. We hand the network physical priors (NDVI, CHM) and
-evaluate headline on **Occlusion-Recall** — recall on canopy-occluded roads.
+Per-pixel **binary road segmentation** from Resourcesat-2/2A **LISS-IV** (5.8 m;
+3 bands B2/B3/B4 = G/R/NIR; no Blue/SWIR) where roads are hidden under canopy,
+shadow, clutter — then graph healing + criticality (Phases 2–4).
 
-**Architecture decision (deadline-driven):**
+**Occlusion is handled by context-aware deep learning** (Transformer attention
+"sees through" gaps) — not an explicit height prior. NDVI is the only derived
+occlusion cue.
 
 | Tier | Model | Role | Status |
 |---|---|---|---|
-| **B0 baseline** | smp UNet++/Linknet, ResNet34/EffNet-b0, **stem inflated** | the GUARANTEED paper number | runnable when env installed |
-| **B1 hero (stretch)** | DINOv3 ViT-L **SAT-493M** (timm, non-gated) + aux + decoder | foundation-model arm | wired; needs `timm` + weights download |
-| **B2 stretch** | Clay v1.5 (GSD/wavelength-aware, ingests G/R/NIR natively) | non-RGB foundation arm | guarded stub |
-| dev/CI | MiniUNet (dep-free, optional D-LinkNet center) | smoke tests only | runs today |
+| **Baseline** | smp UNet++ / **ResNet34** (stem-inflated) | guaranteed result | **trained** (OccRec ≈ 0.39, 3-epoch) |
+| **Advanced** | smp **SegFormer / MiT** (`mit_b2`) — Transformer/attention | context-aware | wired, not yet run |
+| dev/CI | MiniUNet (dep-free, optional D-LinkNet center) | smoke tests | runs |
+| optional | DINOv3-SAT-493M (timm) | stretch arm | optional |
 
-The paper's headline (the **input-stack ablation** `RGB → +NDVI → +CHM`) and the
-**Occlusion-Recall** metric ride on B0 — they do **not** require DINOv3 or Clay.
-LUPI/Clay distillation (the `liss4_dinov3_explorer` teacher–student idea) is
-explicitly **out of scope** for Phase I; it would attach as a `λ·L_distill` term.
+**Input stack = 4-channel `[G, R, NIR, NDVI]`** (CHM dropped). Labels = **OSM**
+(auto-rasterized — zero manual labelling). Pretraining = **DeepGlobe** (downsampled).
 
----
-
-## 1. Step-by-step pipeline (inputs → operation → outputs)
-
-### Step 1 — Raw inputs
-- **LISS-IV** G/R/NIR (Bhoonidhi STAC + JWT) — primary imagery, 5.8 m.
-- **CHM** (canopy height) — co-registered openCHm/CHMv2 GeoTIFF (occlusion prior).
-- **OSM roads** (osmnx) — the labels (noisy).
-- *(optional)* **Sentinel-2** (Planetary Computer) — spectral/temporal context.
-
-### Step 2 — Put everything on one grid
-*Operation:* reproject all layers to **EPSG:32643** (UTM 43N); resample CHM/S2 to
-the LISS-IV 5.8 m grid (`bilinear` for continuous, `nearest` for labels).
-`src/preprocess/coregister.py`. → *aligned layers.*
-
-### Step 3 — Derive NDVI
-*Operation:* `NDVI = (NIR − Red) / (NIR + Red)` on **reflectance** (not raw DN).
-`src/data/indices.py` (Rouse et al. 1974). → *vegetation/occlusion channel.*
-
-### Step 4 — Build the 5-channel stack
-*Operation:* concatenate `[Green, Red, NIR, NDVI, CHM]` → `[5, H, W]`.
-`src/data/dataset.py::_stack_channels`. → *model input.*
-
-### Step 5 — Make the label
-*Operation:* rasterise OSM road lines onto the LISS-IV grid; **buffer** to a
-config width and burn with `rasterio.features.rasterize(all_touched=True)` so thin
-5.8 m roads survive. `src/data/sources/osm.py` (osmnx; Boeing 2017). → *binary mask.*
-
-### Step 6 — Tile + spatial-block split
-*Operation:* cut into 256×256 tiles (`.npz`); split **by spatial blocks** (whole
-~1.5 km blocks to one fold), NOT random pixels, to prevent autocorrelation leakage
-inflating metrics (Roberts et al. 2017). `cfg.data.cv`. → *train / val / test tiles.*
-
-### Step 7 — Normalize (real data)
-*Operation:* per-channel standardise raw 10-bit DN via `cfg.data.norm.{mean,std}`
-(synthetic is already [0,1] → no-op). `src/data/dataset.py::_to_tensors`. → *standardised input.*
-
-### Step 8 — Augment (train only)
-*Operation:* canopy-driven **OcclusionAugment** (hide road pixels under canopy →
-teaches inpainting), **ScaleAugment** (MTF blur-downsample), optional
-albumentations. `src/data/augment.py`. → *harder training tiles.*
-
-### Step 9 — Model forward
-*Operation (B0):* smp encoder (pretrained, **stem inflated** to 5 ch — copies RGB
-conv1 onto G/R/NIR, mean-inits NDVI/CHM, rescaled 3/5; Carreira & Zisserman 2017)
-→ decoder → **logits [1, H, W]**. Optional D-LinkNet **Dblock** center (dilation
-1/2/4/8) bridges canopy gaps (Zhou et al. 2018). `src/models/factory.py`.
-*Operation (B1):* DINOv3 SAT-493M (frozen, SAT normalization) on G/R/NIR → patch
-tokens → `[B,1024,h,w]`; NDVI/CHM via a parallel aux CNN; concat → light decoder.
-
-### Step 10 — Loss
-*Operation:* `L = 0.3·BCE + 0.4·Dice + 0.3·clDice`.
-- BCE = per-pixel (Milletari 2016 for Dice; class imbalance).
-- **clDice** = topology/connectivity (Shit et al. 2021).
-- **Canopy-weighted BCE** (optional, `loss.canopy_weight`): pixel weight
-  `1 + w·canopy` so missing an *occluded* road costs more — pushes Occlusion-Recall.
-`src/losses/losses.py`. → *scalar loss.*
-
-### Step 11 — Optimise
-*Operation:* AdamW; CUDA AMP + GradScaler (no-op on MPS/CPU). `src/train.py`.
-
-### Step 12 — Validate
-*Operation:* `logits → sigmoid → threshold → mask`; metrics **pooled over global
-pixel counts** (unbiased) — IoU, Dice, **Occlusion-Recall** (headline) — plus
-buffered/relaxed IoU & P/R/F1 at 3–5 px (Wiedemann 1998; Demir 2018). Checkpoint
-on best Occlusion-Recall. → *metrics row.*
-
-### Step 13 — Artifacts
-`runs/train/<timestamp>/`: `best.pt`, `metrics.csv`, `figures/loss_curve.*`,
-`figures/prediction.*` (FCC | GT | pred | occlusion overlay). *These are paper figures.*
-
-### Inference
-LISS-IV tile → Steps 2–4, 7, 9 → probability → threshold → **road mask** → Phase II
-(skeletonise → graph → healing) → Phase III (betweenness criticality, resilience).
+Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph in
+`src/phase2/`.
 
 ---
 
-## 2. Data-flow graph
+## 1. Step-by-step pipeline (input → operation → output)
 
+### Step 1 — Ingest → OSM-labelled tiles  (`src/phase1/preprocess/ingest_liss4.py`) ✅ built+run
+- *In:* LISS-IV B2/B3/B4 GeoTIFFs + AOI shapefile.
+- *Op:* reference grid = Green band (CRS/transform); Red/NIR aligned via WarpedVRT;
+  **NDVI** = (NIR−Red)/(NIR+Red) per tile; **canopy = NDVI > thr** (occlusion proxy);
+  **OSM roads auto-pulled (osmnx) for the AOI → buffered → rasterised** onto the grid
+  → per-tile road `mask`; tile to 256² `.npz`; band-statistics written.
+- *Out:* `data/tiles/*.npz` {bands[3], ndvi, canopy, mask, bounds} + `data.norm` stats.
+
+### Step 2 — Normalize  (`src/phase1/data/dataset.py`)
+- *Op:* per-channel standardise raw DN via `cfg.data.norm.{mean,std}`. → standardised input.
+
+### Step 3 — Augment (train only)  (`src/phase1/data/augment.py`)
+- *Op:* canopy-driven **OcclusionAugment** (hide roads under canopy → teaches gap
+  inference), **ScaleAugment** (MTF blur-downsample), albumentations. → harder tiles.
+
+### Step 4 — Model forward  (`src/phase1/models/factory.py`)
+- *Baseline:* smp encoder (ImageNet, **stem inflated** to 4-ch — RGB conv1 copied to
+  G/R/NIR, mean-init NDVI; Carreira & Zisserman 2017) → decoder → logits `[1,H,W]`.
+- *Advanced:* swap encoder to **`mit_b2`** (SegFormer) — long-range attention is the
+  "see through occlusion" mechanism. Optional D-LinkNet **Dblock** center.
+
+### Step 5 — Loss  (`src/phase1/losses/losses.py`)
+- *Op:* `L = 0.3·BCE + 0.4·Dice + 0.3·clDice`. clDice = topology/connectivity
+  (Shit 2021). Optional **canopy-weighted BCE** (`loss.canopy_weight`) penalises
+  missed *occluded* roads → pushes Occlusion-Recall.
+
+### Step 6 — Train + validate  (`src/phase1/train.py`)
+- *Op:* AdamW; CUDA AMP+GradScaler (no-op on MPS). Validation metrics pooled over
+  **global pixel counts** (unbiased): IoU, Dice, **Occlusion-Recall** (headline),
+  relaxed IoU/F1 at 3–5 px. Checkpoint on best Occlusion-Recall.
+- *Out:* `runs/train/<ts>/` {best.pt, metrics.csv, loss_curve, prediction panel}.
+
+### Step 7 — Export (the Phase 1→2 contract)  ⬜ TODO `src/phase1/predict.py`
+- *Op:* load `best.pt` → run inference over the whole scene (windowed) → **stitch →
+  georeferenced `pred_mask.tif`** (CRS + transform).
+- *Out:* `pred_mask.tif` — the single artifact Phase 2 consumes.
+
+### Data-flow
 ```
- LISS-IV G/R/NIR    CHM      OSM roads        Sentinel-2 (opt)
-      │              │           │                  │
-      ▼              ▼           ▼                  ▼
-   [2] REPROJECT EPSG:32643 + RESAMPLE to 5.8 m grid
-      │              │                          context
-      ▼              │
-   [3] NDVI          │
-      └────┬─────────┘
-           ▼
-   [4] STACK [G,R,NIR,NDVI,CHM] [5,H,W]      [5] RASTERIZE OSM -> mask [1,H,W]
-           │                                         │
-           └──────────────┬──────────────────────────┘
-                          ▼
-   [6] TILE 256 + SPATIAL-BLOCK SPLIT  ──►  train / val / test
-                          │
-              [7] NORMALIZE (real DN)   [8] AUGMENT (occlusion+scale, train only)
-                          ▼
-   [9] MODEL  smp(stem-inflated)+[Dblock]  |  DINOv3 SAT-493M + aux  ─► logits
-                          │
-   [10] LOSS BCE+Dice+clDice (+canopy-weight)   [12] sigmoid->thr->mask
-                          │                       METRICS (global): IoU, Dice,
-   [11] AdamW (+GradScaler on CUDA)               Occlusion-Recall + relaxed
-                          ▼
-   [13] runs/train/<ts>/ : best.pt, metrics.csv, loss_curve, prediction panel
-                          ▼
-            INFERENCE -> road mask -> Phase II graph -> Phase III resilience
+LISS-IV G/R/NIR + AOI ─► [1] ingest: NDVI · canopy=NDVI>thr · OSM→mask · tile
+                                   │
+              [2] normalize ─► [3] augment (occlusion+scale, train only)
+                                   ▼
+   [4] model  smp ResNet (baseline) | smp SegFormer/MiT (advanced)  ─► logits
+                                   │
+   [5] LOSS BCE+Dice+clDice (+canopy-weight)   [6] sigmoid→thr→mask
+                                   │             METRICS (global): IoU, Dice,
+                                   ▼             Occlusion-Recall + relaxed
+   runs/train/<ts>/  ──► [7] export pred_mask.tif (georeferenced) ──► Phase 2
 ```
 
 ---
 
-## 3. Experiments (the paper)
-- **Input-stack ablation (headline):** `RGB → +NDVI → +CHM (→ +S2)`, reported with
-  Occlusion-Recall + IoU.
-- **Loss ablation:** BCE → +Dice → +clDice; canopy-weight on/off.
-- **Backbone arms:** B0 smp baseline vs B1 DINOv3-SAT vs (B2 Clay).
-- **Occlusion-Recall vs OCOI:** stratify test segments by the per-segment OCOI
-  (`src/canopy/`) — the figure that proves the under-canopy claim.
-- Report **mean ± std over spatial-block folds** + paired significance.
+## 2. Phases 2–4 (graph + resilience) — extensible by contract
 
-## 4. Known gaps / next steps (honest)
-- Real-data hooks (`preprocess/pipeline.py` Stage-1 LISS-IV unpack, Bhoonidhi
-  endpoints) are skeletons → activate when a product is in hand.
-- `cfg.data.norm` must be filled from EDA band statistics before any real run.
-- DINOv3 SAT features looked **noisy** in the explorer — gate B1 on confirming
-  clean features before relying on it; B0 is the safe paper.
-- D-LinkNet Dblock is wired into MiniUNet; for smp insert it between encoder and
-  decoder (a small wrapper) — near-term task.
+**Contract:** Phase 1 emits **`pred_mask.tif`** (or use the OSM mask for dev). Each
+phase consumes only the previous phase's artifact, so work parallelises.
+
+- **Phase 2 — graph** (`src/phase2/graph/`): binarize+clean → `skeletonize` → `sknw`
+  → NetworkX → georeference → **heal** (Union-Find + MST, distance×angle) → weight →
+  GeoJSON + graph + Connectivity Ratio. Ref: CRESI.
+- **Phase 3 — resilience:** NetworkX **betweenness** → Gatekeeper nodes; node ablation
+  (targeted vs random) → **Resilience Index** `R = L_base / L_perturbed`.
+- **Phase 4 — dashboard:** Streamlit + Leaflet (criticality heatmap, click-to-flood).
+
+---
+
+## 3. Experiments / ablations
+- **Occlusion ablation (headline):** baseline → +occlusion-aug → +clDice →
+  +canopy-weight → SegFormer, reported with **Occlusion-Recall** + relaxed IoU.
+- **Backbone:** smp ResNet vs smp SegFormer (vs optional DINOv3).
+- **Pretraining:** scratch vs DeepGlobe-pretrained.
+- **Generalisation:** leave-one-terrain-out (needs ≥2 terrains).
+- Report **mean ± std over spatial-block folds** (Roberts 2017).
+
+## 4. Status & outstanding
+- ✅ Step 1 ingest (OSM labels) + baseline trained on real data.
+- ⬜ **Export `pred_mask.tif`** (Phase 1→2 contract).
+- ⬜ Spatial-block CV wired into `train.py` (currently contiguous split → leaky metric).
+- ⬜ LR scheduler + early-stop + more epochs (metrics bounce at 3 epochs).
+- ⬜ DeepGlobe pretraining; SegFormer run; augmentation upgrades; multi-terrain.
+- ⬜ Phase 2 `src/phase2/graph/` (start on OSM masks).
+- ⏸ Parked: CHM/DINOv3/Clay/distillation, OCOI, Sentinel-2.
+
+> Note: where OSM already covers the area, the model's value is **generalisation**
+> (areas without OSM) + **occlusion recovery**. Phase 2/3 may run on the OSM graph
+> directly; the model graph is the automated / "no-OSM" demonstration.

@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.dataset import DEFAULT_CHANNELS, SyntheticRoadDataset, TileFolderDataset
-from ..viz.plots import save_fig, set_pub_style
+from ...common.viz import save_fig, set_pub_style
 
 
 def _load_config(path: str) -> dict:
@@ -231,7 +231,7 @@ def run(cfg: dict) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Phase I EDA")
-    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--config", default="config/phase1/config.yaml")
     args = ap.parse_args()
     run(_load_config(args.config))
 

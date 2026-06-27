@@ -1,7 +1,7 @@
 """Phase I training entrypoint — device-dynamic (MPS / CUDA / CPU).
 
 Run (dep-free smoke test on M1):
-    PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.train --config config/config.yaml
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/config.yaml
 
 What it does
 ------------
@@ -32,8 +32,9 @@ from .data.dataset import DEFAULT_CHANNELS, SyntheticRoadDataset, TileFolderData
 from .losses import CombinedRoadLoss
 from .metrics import pixel_counts, relaxed_iou, relaxed_prf
 from .models import build_model
-from .utils import amp_autocast, describe_runtime, get_device, set_seed
-from .viz.plots import save_fig, save_prediction_panel, set_pub_style
+from ..common.config import load_config
+from ..common.runtime import amp_autocast, describe_runtime, get_device, set_seed
+from ..common.viz import save_fig, save_prediction_panel, set_pub_style
 
 
 def _pbar(iterable, **kw):
@@ -43,28 +44,6 @@ def _pbar(iterable, **kw):
         return tqdm(iterable, **kw)
     except ImportError:
         return iterable
-
-
-def _deep_merge(base: dict, over: dict) -> dict:
-    """Recursively merge `over` onto `base` (override wins; dicts merged)."""
-    out = dict(base)
-    for k, v in over.items():
-        out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
-    return out
-
-
-def _load_config(path: str) -> dict:
-    """Load YAML config. Supports `extends: <sibling.yaml>` to inherit a base
-    config and override only a few keys (e.g. config_gpu.yaml extends config.yaml)."""
-    import yaml
-    with open(path) as f:
-        cfg = yaml.safe_load(f) or {}
-    base = cfg.pop("extends", None)
-    if base:
-        base_path = Path(path).parent / base
-        with open(base_path) as bf:
-            cfg = _deep_merge(yaml.safe_load(bf) or {}, cfg)
-    return cfg
 
 
 def _parse_norm(cfg: dict):
@@ -255,9 +234,9 @@ def run(cfg: dict) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Phase I training")
-    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--config", default="config/phase1/config.yaml")
     args = ap.parse_args()
-    run(_load_config(args.config))
+    run(load_config(args.config))
 
 
 if __name__ == "__main__":

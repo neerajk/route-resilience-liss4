@@ -14,7 +14,7 @@ USE CASE: you provide LISS-IV B2/B3/B4 = Green/Red/NIR GeoTIFFs (three files OR 
 OUTPUT tile schema (.npz): bands[3,ts,ts] (G,R,NIR), ndvi[ts,ts], canopy[ts,ts],
   mask[ts,ts] (if labels=osm), [chm[ts,ts] if CHM provided], row, col, bounds.
 
-RUN:  python -m src.preprocess.ingest_liss4 --config config/config.yaml
+RUN:  python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
 Config: cfg.data.liss4 (paths, aoi, labels, buffer_m, tiling).
 """
 from __future__ import annotations
@@ -247,7 +247,7 @@ def ingest(cfg: dict) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Ingest LISS-IV band tifs (+OSM labels) -> .npz tiles")
-    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--config", default="config/phase1/config.yaml")
     args = ap.parse_args()
     ingest(_load_config(args.config))
 

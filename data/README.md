@@ -11,7 +11,7 @@ data/
 ├── tiles/       ← GENERATED .npz training tiles (do not edit; gitignored)
 ```
 
-After placing files, point `config/config.yaml → data.liss4`:
+After placing files, point `config/phase1/config.yaml → data.liss4`:
 ```yaml
   liss4:
     green: data/raw/liss4/B2.tif

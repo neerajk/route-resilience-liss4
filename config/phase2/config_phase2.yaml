@@ -1,0 +1,33 @@
+# =============================================================================
+# rr — Phase II (graph) config. STANDALONE (Phase II is decoupled from Phase I —
+# it only reads a mask GeoTIFF). YOU own this file.
+# Run (once src/phase2/graph exists):
+#   python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
+# =============================================================================
+project:
+  name: rr-phase2
+runtime:
+  seed: 42
+paths:
+  runs: runs
+
+graph:
+  # ---- input mask (the contract) ----
+  # Use the OSM mask now; swap to the model's pred_mask.tif at integration.
+  mask: null               # path to pred_mask.tif OR an OSM-rasterized mask GeoTIFF
+  threshold: 0.5           # binarize probability masks at this value
+
+  # ---- clean-up before skeletonization ----
+  min_object_size: 50      # drop specks smaller than this (px) -> fewer fake nodes
+  closing_radius: 2        # close 1-2 px gaps before skeletonizing
+
+  # ---- topological healing (Union-Find + MST, distance x angle) ----
+  heal:
+    max_gap_m: 60          # only bridge endpoints within this distance (metres)
+    max_angle_deg: 30      # reject bridges that bend more than this (natural trajectory)
+    angle_penalty: 1.0     # cost = dist * (1 + angle_penalty * angle_frac)
+
+  # ---- weighting ----
+  speed_kph_default: 30    # for model-derived edges (no OSM road class)
+
+  out_dir: runs/graph

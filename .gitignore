@@ -19,6 +19,11 @@ runs/
 output/
 cache/
 
+# private / confidential — strategy, venues, deadlines (ours only, never pushed)
+PRIVATE.md
+*.private.md
+docs/private/
+
 # os / editor
 .DS_Store
 .vscode/*.log

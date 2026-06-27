@@ -1,61 +1,76 @@
-# rr — Route Resilience (Phase I)
+# rr — Route Resilience
 
-Occlusion-robust **road extraction** from Resourcesat-2/2A **LISS-IV** (5.8 m,
-G/R/NIR) under tree canopy. Phase I = perception (segmentation). Phases II–III
-(graph healing + criticality/resilience) follow.
+Occlusion-robust **road extraction** from medium-resolution **LISS-IV** satellite
+imagery (5.8 m, Green/Red/NIR), turned into a routable **road graph** and analysed
+for **criticality / resilience**.
 
-Built for **InGARSS 2026 + ISRO hackathon**. Engineering rules: config-driven,
-device-dynamic (MPS/CUDA/CPU), graceful degradation.
+Config-driven, device-dynamic (MPS / CUDA / CPU). Two decoupled phases:
+**Phase 1** = perception (segmentation), **Phase 2** = graph (skeleton → heal →
+network analysis), connected by a single artifact (`pred_mask.tif`).
 
-## Setup (micromamba, from VS Code CLI)
+## Methodology (overview)
+```
+LISS-IV G/R/NIR + AOI
+   └─ ingest: NDVI · canopy=NDVI>thr · OSM roads → rasterised mask · tile
+        └─ segmentation model (smp ResNet baseline → SegFormer/Transformer advanced)
+             loss = BCE + Dice + clDice (+ optional canopy-weighting)
+             metric = Occlusion-Recall (recall on canopy-occluded roads)
+                └─ export → pred_mask.tif (georeferenced)
+                     └─ PHASE 2: skeletonize → graph (sknw/NetworkX) → heal
+                          (Union-Find + MST, distance×angle) → weighted graph
+                               └─ criticality (betweenness) → resilience index
+```
+- **Occlusion** is handled by **context-aware deep learning** (Transformer attention
+  infers road continuity across gaps) + occlusion augmentation + a connectivity
+  (clDice) loss — not an explicit height prior.
+- **Labels** = OpenStreetMap roads, auto-rasterised onto the LISS-IV grid (no manual
+  labelling). **Input stack** = `[G, R, NIR, NDVI]`.
+- Full detail in [`METHODOLOGY.md`](METHODOLOGY.md); run steps in [`RUNBOOK.md`](RUNBOOK.md).
+
+## Setup
 ```bash
 micromamba create -f environment.yml -y
 micromamba activate rr
-# macOS: allow CPU fallback for ops not yet on Metal
-export PYTORCH_ENABLE_MPS_FALLBACK=1
+export PYTORCH_ENABLE_MPS_FALLBACK=1     # macOS
 ```
-In VS Code: **Python: Select Interpreter** → the `rr` env (`.vscode/settings.json`
-points at `~/micromamba/envs/rr/bin/python` — adjust if your micromamba root differs).
+VS Code: **Python: Select Interpreter → rr**.
 
-## Run
+## Quick start
 ```bash
-# dep-free smoke test (no smp/geo stack needed): set model.arch=miniunet in config
-python -m src.train --config config/config.yaml
-
-# guaranteed baseline (needs full env): model.arch=smp (default)
-python -m src.train --config config/config.yaml
+# smoke test (synthetic, no data)
+python -m src.phase1.train --config config/phase1/smoke.yaml
+# Step 1 — ingest: OSM labels + LISS-IV tiles (paths in config/phase1/config.yaml -> data.liss4)
+python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
+# train the baseline (set data.source: tiles + paste data.norm first)
+python -m src.phase1.train --config config/phase1/config.yaml
+# GPU: python -m src.phase1.train --config config/phase1/config_gpu.yaml
 ```
-Artifacts → `runs/train/<timestamp>/` : `best.pt`, `metrics.csv`,
-`figures/{loss_curve,prediction}.{pdf,png}`.
 
-## Models (`cfg.model.arch`)
-| arch | what | when |
+## Models (`cfg.model.arch` / `cfg.model.encoder`)
+| setting | what | role |
 |---|---|---|
-| `miniunet` | dep-free U-Net (+ optional `center: dblock`) | smoke/CI |
-| `smp` | UNet++/Linknet, stem-inflated 5-ch | **paper baseline** |
-| `dinov3` | DINOv3 SAT-493M (timm, non-gated) + aux | hero (stretch) |
-| `clay` | Clay v1.5 (G/R/NIR native) | stretch (stub) |
+| `arch: miniunet` | dep-free U-Net (+ optional Dblock center) | smoke/CI |
+| `arch: smp` + `encoder: resnet34` | UNet++ / ResNet (stem-inflated 4-ch) | **baseline** |
+| `arch: smp` + `encoder: mit_b2` | SegFormer / Transformer (attention) | **advanced** |
+| `arch: dinov3` | DINOv3 SAT-493M (timm) | optional |
 
 ## Layout
 ```
-config/config.yaml   # single source of truth (search "USER INPUT")
-environment.yml      # micromamba env
+config/
+  phase1/  config.yaml · config_gpu.yaml · smoke.yaml
+  phase2/  config_phase2.yaml
 src/
-  data/      synthetic, dataset, augment, indices, sources/ (bhoonidhi,planetary,osm)
-  preprocess/ degrade, coregister, pipeline (real LISS-IV -> .npz tiles)
-  models/    factory (miniunet | smp | dinov3 | clay; Dblock; stem inflation)
-  losses/    BCE + Dice + clDice (+ canopy-weighted)
-  metrics/   IoU, Dice, Occlusion-Recall (global), relaxed IoU/F1
-  canopy/    OCOI (Treepedia sampling + per-segment occlusion index)
-  viz/       publication plots + prediction panel
-  train.py   entrypoint
-METHODOLOGY.md       # step-by-step pipeline + data-flow graph
-REFERENCES.md        # peer-reviewed citations
+  common/   runtime (device/seed/amp) · config (extends loader) · viz (figures)
+  phase1/   train.py · data/ · preprocess/ (ingest_liss4) · models/ · losses/ · metrics/ · eda/
+  phase2/   graph/  (mask → skeleton → graph → heal)   ← in progress
+data/raw/liss4/  data/raw/aoi/  data/tiles/   (gitignored)
+runs/   (gitignored)
+METHODOLOGY.md · RUNBOOK.md · REFERENCES.md · CONTRIBUTING.md
 ```
 
-## Real-data path (next milestone)
-1. Fill `cfg.preprocess` (AOI bbox, dates) + `.env` (Bhoonidhi creds).
-2. `python -m src.preprocess.pipeline --config config/config.yaml --dry-run`.
-3. Set `cfg.data.source: tiles`, `cfg.data.root`, and `cfg.data.norm.{mean,std}`.
+## Status
+- ✅ Step 1 ingest (OSM labels) + segmentation baseline trained on real data.
+- ⬜ Next: spatial-block CV, LR schedule + more epochs, DeepGlobe pretrain, SegFormer,
+  `pred_mask.tif` export (Phase 1→2 contract), Phase 2 `src/phase2/graph/`.
 
-See `METHODOLOGY.md` for the full pipeline and experiment plan.
+See [`METHODOLOGY.md`](METHODOLOGY.md) and [`RUNBOOK.md`](RUNBOOK.md).

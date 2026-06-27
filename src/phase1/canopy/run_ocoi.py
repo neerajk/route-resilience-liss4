@@ -32,7 +32,7 @@ def run(cfg: dict) -> Path:
     # lazy imports (full uv env)
     import matplotlib.pyplot as plt
     from ..data.sources import osm
-    from ..viz.plots import save_fig, set_pub_style
+    from ...common.viz import save_fig, set_pub_style
     from . import ocoi, sampling
 
     pp = cfg["preprocess"]
