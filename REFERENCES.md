@@ -38,7 +38,15 @@ peer-reviewed (preprint/blog/docs) — flagged per project rules.
 - **Tolan et al. (2024).** *Canopy height from imagery.* Remote Sensing of Environment. — CHM prior.
 - **Li et al. (2015).** *Treepedia / Green View Index.* Urban Forestry & Urban Greening 14(3):675–685. — point-sampling design for OCOI.
 
-## Phase II/III (forward-looking)
+## Phase 2 — Road Network Extraction (code referenced)
+- **Image-Py/sknw** (MIT) — skeleton→NetworkX graph (`build_sknw`). *Dependency.* https://github.com/Image-Py/sknw
+- **avanetten/cresi** (Apache-2.0) — mask→sknw→graph→speeds pipeline. *Pattern reference.* https://github.com/avanetten/cresi
+- **CosmiQ/apls** (Apache-2.0) — APLS road-graph similarity metric. *Reference for topo-accuracy.* https://github.com/CosmiQ/apls
+- **Van Etten et al.** *City-Scale Road Extraction from Satellite Imagery (CRESI).* arXiv:1908.09715.
+- **PaRK-Detect (2023)** arXiv:2302.13263 — occlusion-broken endpoints are usually truly connected (justifies healing).
+- **scikit-image** — `skeletonize`, morphology. **NetworkX** — graph + centrality.
+
+## Phase 3 — Resilience (forward-looking)
 - **Freeman (1977).** *Betweenness centrality.* Sociometry.
 - **Albert, Jeong, Barabási (2000).** *Error and attack tolerance of complex networks.* Nature 406.
 - **Latora & Marchiori (2001).** *Efficient behavior of small-world networks.* Phys. Rev. Lett.
