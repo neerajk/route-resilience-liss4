@@ -80,6 +80,47 @@ All options live in `config/phase2/config_phase2.yaml → graph`:
 → `runs/graph/<ts>/`: `graph.graphml` (Phase 3 input), `roads.geojson` (QGIS),
 `metrics.csv` (Connectivity Ratio), and a healing overlay (window/single mode).
 
+## 10. Phase 3 — resilience (config-driven; clean CLI)
+Point the config at a Phase 2 graph, then run:
+```bash
+# config/phase3/config_phase3.yaml -> resilience.graph: runs/graph/<ts>/graph.graphml
+python -m src.phase3.resilience.run_resilience --config config/phase3/config_phase3.yaml
+```
+Options in `config/phase3/config_phase3.yaml → resilience`: `weight` (travel_time_s),
+`betweenness_k`, `efficiency_samples`, `ablation.{strategies,max_fraction,steps}`.
+Big/slow graph → lower `efficiency_samples`/`betweenness_k`. CPU only.
+
+→ `runs/resilience/<ts>/`: `criticality.geojson` (betweenness heatmap), `gatekeepers.csv`,
+`resilience_curves.csv` + `figures/resilience_curves`, `resilience_summary.csv` (Resilience Index).
+
+## 11. Phase 4 — dashboard (Streamlit + Leaflet)
+
+**One-time: install Phase 4 deps** (if env already existed before Phase 4 was added):
+```bash
+micromamba activate rr
+pip install "streamlit>=1.32" "folium>=0.17" "streamlit-folium>=0.22" "plotly>=5.20"
+```
+
+**Run** (always from project root):
+```bash
+micromamba activate rr
+streamlit run src/phase4/dashboard.py
+```
+Opens at `http://localhost:8501`. The sidebar auto-discovers every Phase 3 run in
+`runs/resilience/`.
+
+**Enable the Flood Simulator**: edit `config/phase4/config_phase4.yaml` and set
+`dashboard.graph_path` to the Phase 2 graph you want to stress-test:
+```yaml
+dashboard:
+  graph_path: runs/graph/<ts>/graph.graphml
+```
+
+→ Four tabs: **Criticality Map** (Leaflet, nodes coloured by betweenness),
+**Resilience Curves** (interactive Plotly ablation chart + Resilience Index table),
+**Gatekeepers** (sortable table of top junctions),
+**Flood Simulator** (pick nodes → remove → see fragmentation live).
+
 ---
 
 ## Mac ↔ GPU at a glance

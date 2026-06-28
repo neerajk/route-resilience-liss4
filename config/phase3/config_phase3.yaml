@@ -1,0 +1,29 @@
+# =============================================================================
+# rr — Phase 3 (resilience) config. STANDALONE. All options here; CLI is just:
+#   python -m src.phase3.resilience.run_resilience --config config/phase3/config_phase3.yaml
+# =============================================================================
+project:
+  name: rr-phase3
+runtime:
+  seed: 42
+paths:
+  runs: runs
+
+resilience:
+  # >>> USER INPUT: the Phase 2 graph to analyse:
+  graph: null              # e.g. runs/graph/<ts>/graph.graphml
+  weight: travel_time_s    # edge weight: travel_time_s | length_m | null (hop count)
+
+  # ---- speed/accuracy knobs (raise for accuracy, lower for speed on big graphs) ----
+  betweenness_k: 500       # sampled sources for approx betweenness (null = exact, slow)
+  efficiency_samples: 300  # sampled sources for global efficiency
+  gatekeepers_top_n: 25    # how many top Gatekeeper nodes to export
+
+  # ---- stress test (node ablation) ----
+  ablation:
+    strategies: [betweenness, degree, random]   # targeted vs busiest vs accidental
+    max_fraction: 0.10     # remove up to this fraction of nodes
+    steps: 11              # number of removal points (0 .. max_fraction)
+
+  seed: 42
+  out_dir: runs/resilience

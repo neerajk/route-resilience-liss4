@@ -24,8 +24,12 @@ network analysis), connected by a single artifact (`pred_mask.tif`).
   │ → HEAL (Union-Find + MST) → weight → graph.graphml    │
   └───────────────────────┬───────────────────────────────┘
                           ▼
-  ┌──────────────── PHASE 3 / 4 — resilience (next) ──────┐
-  │ betweenness → Resilience Index → dashboard            │
+  ┌──────────────── PHASE 3 — resilience ─────────────────┐
+  │ betweenness → ablation → Resilience Index             │
+  └───────────────────────┬───────────────────────────────┘
+                          ▼
+  ┌──────────────── PHASE 4 — dashboard ──────────────────┐
+  │ Streamlit / Leaflet (criticality + flood simulator)   │
   └────────────────────────────────────────────────────────┘
 ```
 - **Occlusion** is handled by **context-aware deep learning** (Transformer attention
@@ -67,10 +71,14 @@ python -m src.phase1.train --config config/phase1/config.yaml
 config/
   phase1/  config.yaml · config_gpu.yaml · smoke.yaml
   phase2/  config_phase2.yaml
+  phase3/  config_phase3.yaml
+  phase4/  config_phase4.yaml
 src/
   common/   runtime (device/seed/amp) · config (extends loader) · viz (figures)
   phase1/   train.py · data/ · preprocess/ (ingest_liss4) · models/ · losses/ · metrics/ · eda/
   phase2/   graph/  (tiled mask → skeleton → graph → heal → export)
+  phase3/   resilience/  (betweenness → ablation → Resilience Index)
+  phase4/   dashboard.py  (Streamlit: criticality map · curves · flood simulator)
 data/raw/liss4/  data/raw/aoi/  data/tiles/   (gitignored)
 runs/   (gitignored)
 METHODOLOGY.md · RUNBOOK.md · REFERENCES.md · CONTRIBUTING.md
@@ -80,7 +88,9 @@ METHODOLOGY.md · RUNBOOK.md · REFERENCES.md · CONTRIBUTING.md
 - ✅ **Phase 1** — ingest (OSM labels) + baseline trained (Occlusion-Recall ≈ 0.39).
 - ✅ **Export** `pred_mask.tif` (`src/phase1/predict.py`) — the Phase 1→2 contract.
 - ✅ **Phase 2** — tiled mask → graph → heal → export (`src/phase2/graph/`).
+- ✅ **Phase 3** — criticality (betweenness) + resilience stress-test (`src/phase3/resilience/`).
+- ✅ **Phase 4** — Streamlit dashboard: criticality map, resilience curves, flood simulator (`src/phase4/`).
 - ⬜ **Next** — improve the model (more epochs, SegFormer, DeepGlobe pretrain) so its
-  mask is vectorizable; then **Phase 3** (betweenness → Resilience Index) + **Phase 4** dashboard.
+  mask is vectorizable; run Phases 2→3→4 end-to-end on the real graph.
 
 See [`METHODOLOGY.md`](METHODOLOGY.md) and [`RUNBOOK.md`](RUNBOOK.md).
