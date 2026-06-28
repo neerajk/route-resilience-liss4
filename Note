@@ -60,3 +60,14 @@ The geo stack (gdal/rasterio/osmnx) is identical on both.
 Recommended pattern: keep config/config.yaml (Mac defaults) and a config/config_gpu.yaml (big batch/workers/amp), and just pass --config config/config_gpu.yaml on the GPU box. Ingest/Step 1 runs on either (it's CPU/geo, no GPU needed).
 
 So: develop + Step 1 + smoke-train on the Mac; move to GPU by swapping the torch build and pointing at the GPU config. The pipeline auto-detects the device.
+
+
+
+PHASE 2
+
+Run it (clean, config-driven)
+
+python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
+Default config = mask: null (builds the OSM mask) + tiling.enabled: true → tiles the whole city → heals → exports runs/graph/<ts>/{graph.graphml, roads.geojson, metrics.csv}.
+
+Tip: to skip rebuilding the OSM mask each run, set graph.mask: to the osm_mask.tif from your earlier run (e.g. runs/graph/20260627_235729/osm_mask.tif).

@@ -55,10 +55,15 @@ Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph
   ║  ─► weight (length→time) ─► graph.graphml + roads.geojson           ║
   ╚════════════════════════════════╤═══════════════════════════════════╝
                                      ▼
-  ┌──────────── PHASE 3 / 4 — resilience (next) ─────────────┐
-  │ betweenness → Gatekeeper nodes → ablation → Resilience   │
-  │ Index → Streamlit / Leaflet dashboard                    │
-  └──────────────────────────────────────────────────────────┘
+  ╔══════════════════════ PHASE 3 — resilience ═══════════════════════╗
+  ║  betweenness → Gatekeeper nodes → ablation (targeted/degree/random) ║
+  ║  → global efficiency → Resilience Index + decay curves             ║
+  ╚════════════════════════════════╤═══════════════════════════════════╝
+                                     ▼
+  ┌──────────── PHASE 4 — dashboard ─────────────────────────┐
+  │ Streamlit + Folium/Leaflet + Plotly                       │
+  │ criticality map · resilience curves · flood simulator     │
+  └───────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -128,9 +133,15 @@ phase consumes only the previous phase's artifact, so work parallelises.
   GeoJSON + graph + Connectivity Ratio. **Tiled** over blocks for the whole city
   (`tile.py`; the global heal stitches the seams). Config-driven (`config/phase2/`).
   Sources: sknw (MIT) · CRESI/APLS (refs).
-- **Phase 3 — resilience:** NetworkX **betweenness** → Gatekeeper nodes; node ablation
-  (targeted vs random) → **Resilience Index** `R = L_base / L_perturbed`.
-- **Phase 4 — dashboard:** Streamlit + Leaflet (criticality heatmap, click-to-flood).
+- **Phase 3 — resilience** (`src/phase3/resilience/`) ✅: **betweenness** → Gatekeeper
+  nodes (Freeman 1977); **global efficiency** (Latora–Marchiori 2001); node ablation
+  (targeted vs degree vs random) → **Resilience Index** (efficiency retained) + decay
+  curves (Albert–Barabási 2000). Config-driven (`config/phase3/`).
+- **Phase 4 — dashboard** (`src/phase4/`) ✅: Streamlit + Folium/Leaflet + Plotly.
+  Four tabs: **Criticality Map** (betweenness heatmap on Leaflet), **Resilience Curves**
+  (interactive Plotly ablation chart), **Gatekeepers** (sortable table),
+  **Flood Simulator** (select top-N junctions → remove them → report fragmentation
+  in real time from the Phase 2 graph). Config-driven (`config/phase4/`).
 
 ---
 
@@ -148,8 +159,8 @@ phase consumes only the previous phase's artifact, so work parallelises.
 - ✅ Phase 2 graph (`src/phase2/graph/`) — mask → skeleton → **tiled** graph → heal → export.
 - ⬜ Improve the model so `pred_mask.tif` is vectorizable: spatial-block CV, LR
   scheduler + early-stop + more epochs, DeepGlobe pretrain, SegFormer, augmentation.
-- ⬜ Phase 3 — resilience (betweenness → ablation → Resilience Index) on `graph.graphml`.
-- ⬜ Phase 4 — Streamlit/Leaflet dashboard.
+- ✅ Phase 3 — resilience (`src/phase3/resilience/`): betweenness → ablation → Resilience Index.
+- ✅ Phase 4 — Streamlit/Leaflet/Plotly dashboard (`src/phase4/dashboard.py`).
 - ⏸ Parked: CHM/DINOv3/Clay/distillation, OCOI, Sentinel-2.
 
 > Note: where OSM already covers the area, the model's value is **generalisation**

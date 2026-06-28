@@ -18,11 +18,13 @@ runs/
 *.npz
 output/
 cache/
+scripts/
 
 # private / confidential — strategy, venues, deadlines (ours only, never pushed)
 PRIVATE.md
 *.private.md
 docs/private/
+rr_methodology.docx
 
 # os / editor
 .DS_Store

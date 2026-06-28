@@ -1,0 +1,19 @@
+# =============================================================================
+# rr — Phase 4 (dashboard) config.
+#
+# RUN (from project root):
+#   streamlit run src/phase4/dashboard.py
+#   # or override config path:
+#   RR_PHASE4_CONFIG=config/phase4/config_phase4.yaml streamlit run src/phase4/dashboard.py
+# =============================================================================
+
+dashboard:
+  # auto-discovered: all subdirs of resilience_runs_dir that have resilience_summary.csv
+  resilience_runs_dir: runs/resilience
+
+  # Phase 2 graph for the Flood Simulator tab (optional).
+  # Set to e.g. runs/graph/20240628_120000/graph.graphml after running Phase 2.
+  graph_path: null
+
+  # cap on Leaflet nodes rendered (top-N by betweenness; set 0 for all — can be slow)
+  max_map_nodes: 5000
