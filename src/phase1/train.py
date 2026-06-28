@@ -313,6 +313,29 @@ def _build_scheduler(opt, tr: dict, epochs: int):
     raise ValueError(f"Unknown train.scheduler.name '{name}' (none|cosine|plateau)")
 
 
+def _run_name(cfg: dict, stamp: str) -> str:
+    """Self-documenting run-dir name: ``<arch>_<stage>_<timestamp>``.
+
+    arch  : smp -> ``<decoder>-<encoder>`` (e.g. ``segformer-mit_b2``,
+            ``unetplusplus-resnet34``); else the arch name (miniunet / dinov3).
+    stage : data source mapped to a role -> deepglobe→``pretrain``, tiles→``liss4``,
+            synthetic→``synth`` (so pretrained vs trained checkpoints are obvious).
+    e.g.  segformer-mit_b2_pretrain_20260628_123245
+          unetplusplus-resnet34_liss4_20260628_140000
+    """
+    m = cfg.get("model", {})
+    arch = str(m.get("arch", "miniunet")).lower()
+    if arch == "smp":
+        tag = f"{m.get('decoder', 'unet')}-{m.get('encoder', 'enc')}"
+    elif arch == "dinov3":
+        tag = "dinov3"
+    else:
+        tag = arch
+    src = cfg.get("data", {}).get("source", "data")
+    stage = {"deepglobe": "pretrain", "tiles": "liss4", "synthetic": "synth"}.get(src, str(src))
+    return f"{tag}_{stage}_{stamp}"
+
+
 def run(cfg: dict) -> Path:
     rt = cfg.get("runtime", {})
     set_seed(int(rt.get("seed", 42)))
@@ -369,7 +392,7 @@ def run(cfg: dict) -> Path:
           f"early_stop={'patience=' + str(es_patience) if es_on and es_patience > 0 else 'off'}")
 
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = Path(cfg["paths"]["runs"]) / "train" / stamp
+    out = Path(cfg["paths"]["runs"]) / "train" / _run_name(cfg, stamp)
     fig_dir = out / "figures"
     fig_dir.mkdir(parents=True, exist_ok=True)
     history = []
@@ -448,15 +471,29 @@ def run(cfg: dict) -> Path:
     ax.legend(loc="upper right")
     save_fig(fig, fig_dir, "loss_curve")
 
+    # qualitative panels for 3 RANDOM val patches; title/composite track the data source
     try:
         model.eval()
-        vb = next(iter(val_loader))
+        src = _d.get("source", "synthetic")
+        if src == "deepglobe":
+            panel_title, rgb_order = "DeepGlobe (degraded RGB)", (1, 0, 2)   # R,G,B
+        elif src == "tiles":
+            panel_title, rgb_order = "LISS-IV FCC (NIR-R-G)", (2, 1, 0)      # CIR
+        else:
+            panel_title, rgb_order = "synthetic (false-color)", (2, 1, 0)
+        n_panels = min(3, len(val_ds))
+        pick = np.random.RandomState(int(rt.get("seed", 42)) + 1).choice(
+            len(val_ds), size=n_panels, replace=False)
         with torch.no_grad():
-            vlog = model(vb["image"].to(device)).float().cpu()
-        save_prediction_panel(vb["image"][0], vb["mask"][0], vb["canopy"][0],
-                              vlog[0], fig_dir, "prediction", thr=thr)
+            for j, idx in enumerate(pick):
+                s = val_ds[int(idx)]
+                logit = model(s["image"].unsqueeze(0).to(device)).float().cpu()[0]
+                pname = "prediction" if j == 0 else f"prediction_{j + 1}"
+                save_prediction_panel(s["image"], s["mask"], s["canopy"], logit,
+                                      fig_dir, pname, thr=thr, title=panel_title,
+                                      rgb_order=rgb_order)
     except Exception as e:  # noqa: BLE001 - artifact is best-effort
-        print(f"[train] prediction panel skipped ({e})")
+        print(f"[train] prediction panels skipped ({e})")
 
     print(f"[train] best {best_key}={best_val:.3f} @ epoch {best_ep} | artifacts -> {out}")
     return out

@@ -17,8 +17,8 @@ runtime:
   device: auto            # auto -> CUDA on the GPU box
 
 train:
-  epochs: 60              # real run (raise as needed)
-  batch_size: 24          # ResNet34: 16-32. For SegFormer/mit_b2 use ~12 (≈2x memory).
+  epochs: 50             # real run (raise as needed)
+  batch_size: 12          # ResNet34: 16-32. For SegFormer/mit_b2 use ~12 (≈2x memory).
   num_workers: 8          # 4-8 on CUDA/cloud
   amp: true               # mixed precision + GradScaler (CUDA only)
   lr: 0.001
@@ -29,11 +29,11 @@ loss:
 
 # ---- ADVANCED: SegFormer (MiT-B2 transformer) ------------------------------- #
 # To train the transformer instead of the ResNet baseline:
-#   1. uncomment the block below, 2. set train.batch_size: 12 above (OOM-safe).
+#  1. uncomment the block below, 2. set train.batch_size: 12 above (OOM-safe).
 # Keep encoder == your DeepGlobe-pretrain encoder so warm-start weights transfer.
-# model:
-#   arch: smp
-#   decoder: segformer        # all-MLP SegFormer head (smp.Segformer; needs smp>=0.4)
-#   encoder: mit_b2           # MiT-B2 transformer backbone (attention)
-#   encoder_weights: imagenet # ImageNet-pretrained MiT; stem inflated 3->in_channels
-#   stem_init: inflate
+model:
+  arch: smp
+  decoder: segformer        # all-MLP SegFormer head (smp.Segformer; needs smp>=0.4)
+  encoder: mit_b2           # MiT-B2 transformer backbone (attention)
+  encoder_weights: null # ImageNet-pretrained MiT; stem inflated 3->in_channels
+  stem_init: inflate

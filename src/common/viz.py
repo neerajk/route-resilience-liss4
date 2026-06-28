@@ -53,12 +53,21 @@ def _stretch(a, p_lo: float = 2, p_hi: float = 98):
 
 
 def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "prediction",
-                          thr: float = 0.5) -> None:
+                          thr: float = 0.5, title: str = "input (false-color)",
+                          rgb_order=(2, 1, 0)) -> None:
     """Qualitative 4-panel figure for ONE sample (the paper's hero visual).
 
-    [ LISS-IV FCC (NIR-R-G) | GT roads | prediction>thr | occlusion overlay ]
+    [ <title> | GT roads | prediction>thr | occlusion overlay ]
     The overlay colours under-canopy true road pixels: GREEN = recovered by the
     model, RED = missed — a direct visual read of Occlusion-Recall.
+
+    Parameters
+    ----------
+    title : label for the first (input composite) panel — pass a source-specific
+        string, e.g. "LISS-IV FCC (NIR-R-G)" or "DeepGlobe (degraded RGB)", so the
+        panel is not hardcoded to one dataset.
+    rgb_order : which 3 input channels map to display (R,G,B). Default (2,1,0) gives
+        the LISS-IV CIR composite (NIR,R,G); use (1,0,2) for DeepGlobe-style RGB.
 
     Args take torch tensors for one example: image [C,H,W], mask [1,H,W] or [H,W],
     canopy [1,H,W] or [H,W], logits [1,H,W] or [1,1,H,W].
@@ -72,14 +81,15 @@ def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "pre
     prob = torch.sigmoid(logits.detach().float()).cpu().numpy().squeeze()
     pred = (prob >= thr).astype("float32")
 
-    fcc = np.dstack([_stretch(img[2]), _stretch(img[1]), _stretch(img[0])])  # NIR,R,G
+    r, g, b = (idx if idx < img.shape[0] else 0 for idx in rgb_order)   # clamp to available channels
+    fcc = np.dstack([_stretch(img[r]), _stretch(img[g]), _stretch(img[b])])
     occ_true = (m > 0.5) & (c > 0.5)
     overlay = fcc.copy() * 0.6
     overlay[occ_true & (pred > 0.5)] = [0.0, 1.0, 0.0]   # recovered under canopy
     overlay[occ_true & (pred <= 0.5)] = [1.0, 0.0, 0.0]  # missed under canopy
 
     fig, ax = plt.subplots(1, 4, figsize=(16, 4))
-    ax[0].imshow(fcc); ax[0].set_title("LISS-IV FCC (NIR-R-G)")
+    ax[0].imshow(fcc); ax[0].set_title(title)
     ax[1].imshow(m, cmap="gray"); ax[1].set_title("GT roads")
     ax[2].imshow(pred, cmap="gray"); ax[2].set_title(f"prediction > {thr}")
     ax[3].imshow(overlay); ax[3].set_title("occlusion overlay (G=recovered, R=missed)")

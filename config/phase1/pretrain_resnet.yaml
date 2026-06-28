@@ -1,0 +1,21 @@
+# =============================================================================
+# rr — DeepGlobe pretrain for the ResNet34 / UNet++ BASELINE.
+# Inherits everything from pretrain.yaml (DeepGlobe source, 0.5->5.8 m degrade,
+# RGB band order, relaxed_f1 monitor, occlusion-aug off) and swaps ONLY the model
+# to match the LISS-IV baseline so the warm-start weights transfer cleanly.
+#   python -m src.phase1.pretrain --config config/phase1/pretrain_resnet.yaml
+# Output run dir auto-names: unetplusplus-resnet34_pretrain_<timestamp>
+# =============================================================================
+extends: pretrain.yaml
+
+model:
+  arch: smp
+  in_channels: 3            # RGB pretrain (warm-start inflates 3 -> 4 for LISS-IV)
+  classes: 1
+  decoder: unetplusplus     # match the LISS-IV baseline decoder
+  encoder: resnet34         # match the LISS-IV baseline encoder
+  encoder_weights: imagenet
+  stem_init: smp_default
+
+train:
+  batch_size: 24            # resnet34 is ~2x lighter than mit_b2; raise/lower per VRAM
