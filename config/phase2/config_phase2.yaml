@@ -36,6 +36,12 @@ graph:
 
   # ---- HEALING (Union-Find + MST; also stitches tile seams) --------------- #
   heal:
+    # ONE heal step, TWO modes — what drives the angle-gate:
+    #   geometric   -> endpoint geometry only (VISTA; the only IMPLEMENTED mode today)
+    #   orientation -> GROVE's predicted orientation field (data/grove__orientation.tif)
+    #                  RESERVED for GROVE Stage 6; falls back to geometric until wired.
+    mode: geometric          # geometric | orientation
+    orientation_raster: null # e.g. data/grove__orientation.tif (used only when mode: orientation)
     max_gap_m: 60            # bridge endpoints within this distance (m)
     max_angle_deg: 30        # reject bridges bending more than this
     angle_penalty: 1.0       # cost = dist * (1 + angle_penalty * angle_frac)

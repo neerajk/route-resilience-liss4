@@ -34,7 +34,7 @@ VS Code: `Cmd/Ctrl+Shift+P → Python: Select Interpreter → rr`.
 ## 1. Smoke test (no data)
 Confirms the install + training loop on a synthetic fixture.
 ```bash
-PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/smoke.yaml
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.vista.train --config config/phase1/smoke.yaml
 ```
 
 ---
@@ -44,11 +44,17 @@ Inputs wired in `config/phase1/config.yaml → data.liss4`:
 `data/raw/liss4/B2,B3,B4.tif` + `data/raw/aoi/blore_urban.shp`.
 ```bash
 # quick test: set  data.liss4.max_tiles: 6  (or a small stride) first, then:
-python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
+python -m src.phase1.shared.preprocess.ingest_liss4 --config config/phase1/config.yaml
 # full run: remove the cap
 ```
 → `data/tiles/*.npz` (bands, ndvi, canopy, **mask**) + `data/band_statistics.csv`
 (prints the `data.norm` mean/std).
+
+> **GROVE (Arm B) Stage 1** — after ingest, add the occlusion-completion targets
+> (`under_canopy_road`, `orient`) onto the same tiles (idempotent, no re-ingest):
+> ```bash
+> python -m src.phase1.grove.build_supervision --config config/phase1/grove.yaml
+> ```
 
 ## 3. Wire tiles for training — edit `config/phase1/config.yaml`
 ```yaml
@@ -64,7 +70,7 @@ data:
 
 ## 4. EDA (optional)
 ```bash
-python -m src.phase1.eda.run_eda --config config/phase1/config.yaml
+python -m src.phase1.shared.eda.run_eda --config config/phase1/config.yaml
 ```
 
 ---
@@ -130,7 +136,7 @@ Closes the resolution gap: trains a 3-ch RGB road model on DeepGlobe **degraded
    encoder** so the warm-start weights transfer cleanly.
 3. Run:
    ```bash
-   python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+   python -m src.phase1.vista.pretrain --config config/phase1/pretrain.yaml
    ```
    → `runs/train/<ts>/best.pt`.
 4. Warm-start the LISS-IV model — edit `config/phase1/config.yaml`:
@@ -147,12 +153,12 @@ After picking the model (Step 5) and (optionally) warm-start (Step 6):
 
 **macOS (MPS, dev):**
 ```bash
-PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/config.yaml
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.vista.train --config config/phase1/config.yaml
 ```
 **NVIDIA GPU (CUDA, real training)** — `config_gpu.yaml` extends `config.yaml` and
 overrides only the machine knobs (bigger batch/workers/epochs + AMP):
 ```bash
-python -m src.phase1.train --config config/phase1/config_gpu.yaml
+python -m src.phase1.vista.train --config config/phase1/config_gpu.yaml
 ```
 > To train the **advanced SegFormer on GPU**: uncomment the `model:` block at the
 > bottom of `config_gpu.yaml` AND set `train.batch_size: 12` (OOM-safe). Otherwise it
@@ -165,10 +171,46 @@ Headline metric = **Occlusion-Recall**; artifacts in `runs/train/<ts>/`
 
 ## 8. Export pred_mask.tif (Phase 1 → 2 contract)
 ```bash
-python -m src.phase1.predict --ckpt runs/train/<ts>/best.pt --out data/pred_mask.tif
+python -m src.phase1.vista.predict --ckpt runs/train/<ts>/best.pt
+# default out = data/<arm>__pred_mask.tif (e.g. data/vista__pred_mask.tif); --out to override
 # --binary for 0/1 instead of probability
 ```
 Writes a georeferenced full-scene road GeoTIFF (model + norm read from the checkpoint).
+Point `config/phase2/config_phase2.yaml → graph.mask` at this file (e.g. `data/vista__pred_mask.tif`).
+
+---
+
+## 8b. GROVE (Arm B) — occlusion-completion arm  [Stages 0–5 built]
+Same tiles as VISTA; adds occlusion-completion. **Smoke-test first** (CPU, synthetic):
+```bash
+pip install einops      # cswin/haroadformer need it
+python -m src.phase1.grove.train --config config/phase1/grove_smoke.yaml
+# swap grove.backbone: haroadformer -> cswin -> vista_mit to smoke each
+```
+**Stage 1 — supervision** (under-canopy + sin/cos orientation onto existing tiles):
+```bash
+python -m src.phase1.grove.build_supervision --config config/phase1/grove.yaml
+```
+**Backbone benchmark** (seg-only → full VISTA pipeline w/ CV/TTA):
+```bash
+python -m src.phase1.vista.train --config config/phase1/grove_vista_mit.yaml
+python -m src.phase1.vista.train --config config/phase1/grove_cswin.yaml
+python -m src.phase1.vista.train --config config/phase1/grove_haroadformer.yaml
+```
+**Full GROVE** (seg + orientation + under-canopy focal):
+```bash
+python -m src.phase1.grove.train --config config/phase1/grove.yaml
+```
+**Export + compare:**
+```bash
+python -m src.phase1.grove.predict --ckpt runs/train/grove__<bb>__<ts>/best.pt
+#   -> data/grove__pred_mask.tif (+ data/grove__orientation.tif)
+python -m src.phase1.grove.bench --runs "runs/train/*liss4*" --out runs/bench
+```
+> Caveats: CSWin/HA-RoadFormer have no public weights (train from scratch); if `vista_mit`
+> errors on smp's MiT feature shape, use `backbone: vista_resnet`; run GROVE multi-task with
+> geometric augmentation OFF (orientation-aware aug not yet wired). Stage 6 = Phase 2
+> `heal.mode: orientation` consuming `data/grove__orientation.tif`.
 
 ---
 

@@ -7,7 +7,9 @@ the ingest's memory-safe windowed readers (_Aligned / WarpedVRT).
 Stack = [G, R, NIR, NDVI] (PS-minimal 4-ch). Normalisation matches training
 (cfg.data.norm). Non-overlapping tiles; the <tile_size border strip is left 0.
 
-RUN:  python -m src.phase1.predict --ckpt runs/train/<ts>/best.pt --out data/pred_mask.tif
+RUN:  python -m src.phase1.vista.predict --ckpt runs/train/<ts>/best.pt
+      (default out = data/<arm>__pred_mask.tif, e.g. data/vista__pred_mask.tif; arm from
+       the checkpoint's cfg.arm.name. Override with --out. Naming: src/common/naming.py.)
 (model architecture + norm are read from the checkpoint's saved cfg.)
 """
 from __future__ import annotations
@@ -18,11 +20,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ..common.config import load_config
-from ..common.runtime import describe_runtime, get_device
-from .data.indices import ndvi as compute_ndvi
-from .models import build_model
-from .preprocess.ingest_liss4 import _Aligned, _resolve_band_paths, _pbar
+from ...common.config import load_config
+from ...common.runtime import describe_runtime, get_device
+from ..shared.data.indices import ndvi as compute_ndvi
+from ..shared.models import build_model
+from ..shared.preprocess.ingest_liss4 import _Aligned, _resolve_band_paths, _pbar
 
 
 def predict(cfg: dict, ckpt_path: str, out_path: str, binary: bool = False) -> str:
@@ -104,12 +106,17 @@ def main() -> None:
     ap.add_argument("--ckpt", required=True, help="path to best.pt")
     ap.add_argument("--config", default="config/phase1/config.yaml",
                     help="fallback config if the checkpoint has none")
-    ap.add_argument("--out", default="data/pred_mask.tif")
+    ap.add_argument("--out", default=None,
+                    help="output mask path; default = data/<arm>__pred_mask[_bin].tif "
+                         "(arm from the checkpoint's cfg.arm.name)")
     ap.add_argument("--binary", action="store_true", help="write 0/1 instead of probability")
     args = ap.parse_args()
     ck = torch.load(args.ckpt, map_location="cpu")
     cfg = ck.get("cfg") or load_config(args.config)   # checkpoint cfg = training settings
-    predict(cfg, args.ckpt, args.out, binary=args.binary)
+    # arm-aware default so VISTA and GROVE never overwrite each other's mask
+    from ...common.naming import pred_mask_path
+    out = args.out or str(pred_mask_path(cfg, out_dir="data", binary=args.binary))
+    predict(cfg, args.ckpt, out, binary=args.binary)
 
 
 if __name__ == "__main__":

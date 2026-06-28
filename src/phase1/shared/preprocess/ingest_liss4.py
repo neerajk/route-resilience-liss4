@@ -14,7 +14,7 @@ USE CASE: you provide LISS-IV B2/B3/B4 = Green/Red/NIR GeoTIFFs (three files OR 
 OUTPUT tile schema (.npz): bands[3,ts,ts] (G,R,NIR), ndvi[ts,ts], canopy[ts,ts],
   mask[ts,ts] (if labels=osm), [chm[ts,ts] if CHM provided], row, col, bounds.
 
-RUN:  python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
+RUN:  python -m src.phase1.shared.preprocess.ingest_liss4 --config config/phase1/config.yaml
 Config: cfg.data.liss4 (paths, aoi, labels, buffer_m, tiling).
 """
 from __future__ import annotations

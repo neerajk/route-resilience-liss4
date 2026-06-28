@@ -35,12 +35,14 @@ VS Code (any OS): **Python: Select Interpreter → rr**.
 Commands are identical on every OS (only env-var syntax differs — see Setup).
 ```bash
 # smoke test (synthetic, no data)
-python -m src.phase1.train --config config/phase1/smoke.yaml
+python -m src.phase1.vista.train --config config/phase1/smoke.yaml
 # Step 1 — ingest: OSM labels + LISS-IV tiles (paths in config/phase1/config.yaml -> data.liss4)
-python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
-# train the baseline (set data.source: tiles + paste data.norm first)
-python -m src.phase1.train --config config/phase1/config.yaml
-# GPU: python -m src.phase1.train --config config/phase1/config_gpu.yaml
+python -m src.phase1.shared.preprocess.ingest_liss4 --config config/phase1/config.yaml
+# train VISTA (Arm A) baseline (set data.source: tiles + paste data.norm first)
+python -m src.phase1.vista.train --config config/phase1/config.yaml
+# GPU: python -m src.phase1.vista.train --config config/phase1/config_gpu.yaml
+# GROVE (Arm B) Stage 1 supervision onto existing tiles:
+python -m src.phase1.grove.build_supervision --config config/phase1/grove.yaml
 ```
 
 ## Models (`cfg.model.arch` / `cfg.model.encoder`)

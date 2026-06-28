@@ -7,7 +7,7 @@ resulting ``runs/train/<ts>/best.pt`` warm-starts the LISS-IV model via
 ``train.init_from`` (3-ch RGB → [G,R,NIR,NDVI] stem inflation).
 
 RUN:
-    python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+    python -m src.phase1.vista.pretrain --config config/phase1/pretrain.yaml
 Then set in config/phase1/config.yaml:
     train:
       init_from: runs/train/<ts>/best.pt
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 
-from ..common.config import load_config
+from ...common.config import load_config
 from .train import run
 
 
