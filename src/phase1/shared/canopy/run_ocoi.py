@@ -4,7 +4,7 @@ PIPELINE: OSM roads (osmnx) -> Treepedia-style points -> sample CHM(+NDVI) ->
 per-segment OCOI -> save vector + table + a choropleth map + an OCOI histogram.
 
 RUN (after env setup — see README §2):
-    python -m src.phase1.canopy.run_ocoi --config config/phase1/config.yaml
+    python -m src.phase1.shared.canopy.run_ocoi --config config/phase1/config.yaml
 
 NEEDS (USER INPUT in config.yaml):
   - preprocess.aoi_bbox      : [minlon, minlat, maxlon, maxlat]
@@ -32,7 +32,7 @@ def run(cfg: dict) -> Path:
     # lazy imports (full uv env)
     import matplotlib.pyplot as plt
     from ..data.sources import osm
-    from ...common.viz import save_fig, set_pub_style
+    from ....common.viz import save_fig, set_pub_style
     from . import ocoi, sampling
 
     pp = cfg["preprocess"]

@@ -1,0 +1,9 @@
+# GROVE backbone benchmark — CSWin, SEG-ONLY. Trains via the VISTA pipeline:
+#   python -m src.phase1.vista.train --config config/phase1/grove_cswin.yaml
+# Run dir -> runs/train/grove__cswin__liss4__<ts>/
+# NOTE: no public CSWin checkpoint is auto-loaded -> trains from scratch (set
+# grove.cswin.weights_path to a state_dict to warm-start).
+extends: grove.yaml
+grove:
+  backbone: cswin
+  heads: [seg]

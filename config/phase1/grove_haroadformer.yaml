@@ -1,0 +1,9 @@
+# GROVE backbone benchmark — HA-RoadFormer, SEG-ONLY (heads: [seg]).
+# Seg-only GroveNet returns plain logits, so it trains through the FULL VISTA
+# pipeline (spatial-block CV, cosine LR, early-stop, TTA):
+#   python -m src.phase1.vista.train --config config/phase1/grove_haroadformer.yaml
+# Run dir -> runs/train/grove__haroadformer__liss4__<ts>/  (params/OccRec for bench).
+extends: grove.yaml
+grove:
+  backbone: haroadformer
+  heads: [seg]            # benchmark the BACKBONE in isolation (no orientation head)

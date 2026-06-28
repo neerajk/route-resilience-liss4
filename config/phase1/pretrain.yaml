@@ -4,7 +4,7 @@
 # (sensor-realistic blur-downsample), to warm-start the LISS-IV model. The output
 # best.pt is consumed by `train.init_from` (stem-inflation maps RGB -> G/R/NIR/NDVI).
 #
-#   python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+#   python -m src.phase1.vista.pretrain --config config/phase1/pretrain.yaml
 #   # then in config/phase1/config.yaml set:  train.init_from: runs/train/<ts>/best.pt
 #
 # >>> USER INPUT: put the DeepGlobe dataset at data.deepglobe.root (standard layout

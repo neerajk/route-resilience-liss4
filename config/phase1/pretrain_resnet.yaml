@@ -3,8 +3,8 @@
 # Inherits everything from pretrain.yaml (DeepGlobe source, 0.5->5.8 m degrade,
 # RGB band order, relaxed_f1 monitor, occlusion-aug off) and swaps ONLY the model
 # to match the LISS-IV baseline so the warm-start weights transfer cleanly.
-#   python -m src.phase1.pretrain --config config/phase1/pretrain_resnet.yaml
-# Output run dir auto-names: unetplusplus-resnet34_pretrain_<timestamp>
+#   python -m src.phase1.vista.pretrain --config config/phase1/pretrain_resnet.yaml
+# Output run dir auto-names: vista__unetplusplus-resnet34__pretrain__<timestamp>
 # =============================================================================
 extends: pretrain.yaml
 

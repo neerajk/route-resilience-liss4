@@ -1,0 +1,33 @@
+# GROVE smoke — dep-light, CPU, tiny synthetic. Validates the whole GROVE stack
+# end-to-end (backbone -> FPN -> seg+orientation heads -> GroveLoss -> metrics).
+# Swap grove.backbone to vista_mit | cswin | haroadformer to smoke each one.
+#   python -m src.phase1.grove.train --config config/phase1/grove_smoke.yaml
+project: {name: rr-grove-smoke, task: occlusion-robust-road-extraction}
+runtime: {device: cpu, seed: 42}
+paths: {runs: runs}
+arm: {name: grove, description: "GROVE smoke"}
+data:
+  source: synthetic
+  channels: [green, red, nir, ndvi]      # 4-ch (matches model.in_channels)
+  tile_size: 64
+  synthetic: {canopy_fraction: 0.35, n_roads: 9, road_width: 1}
+  train_samples: 4
+  val_samples: 2
+  norm: {mean: null, std: null}
+model: {arch: grove, in_channels: 4, classes: 1}
+grove:
+  backbone: haroadformer                 # vista_mit | vista_resnet | cswin | haroadformer
+  heads: [seg, orientation]
+  decoder_dim: 32
+  pos_encoding: sincos
+  haroadformer: {dims: [32,64,96,128], depths: [1,1,1,1], window: 7, global_tokens: 4}
+  cswin:        {dims: [32,64,96,128], depths: [1,1,1,1], stripes: [1,2,7,7]}
+  coanet: {enabled: false}
+loss:
+  cldice_iters: 3
+  weights: {bce: 0.3, dice: 0.4, cldice: 0.3}
+  canopy_weight: 1.5
+  ucr_weight: 2.0
+  orient_weight: 0.5
+train: {epochs: 1, batch_size: 2, num_workers: 0, lr: 0.001, weight_decay: 0.0001}
+eval: {threshold: 0.5, monitor: occlusion_recall}

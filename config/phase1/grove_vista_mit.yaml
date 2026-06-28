@@ -1,0 +1,11 @@
+# GROVE backbone benchmark — VISTA's encoder (MiT-B2, ImageNet weights), SEG-ONLY.
+# The control row: GROVE framework on the SAME encoder VISTA uses, so any gap vs
+# the plain VISTA arch=smp run isolates the framework (FPN/heads), not the encoder.
+#   python -m src.phase1.vista.train --config config/phase1/grove_vista_mit.yaml
+# Run dir -> runs/train/grove__mit_b2__liss4__<ts>/  (model_tag = encoder name).
+extends: grove.yaml
+grove:
+  backbone: vista_mit
+  encoder: mit_b2          # mit_b2 (SegFormer family) | resnet34 via backbone: vista_resnet
+  encoder_weights: imagenet
+  heads: [seg]
