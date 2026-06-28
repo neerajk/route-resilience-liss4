@@ -1,8 +1,15 @@
 # rr — Runbook
 
-Run from the project root `~/Desktop/Projects/rr`. Layout: `src/common` (shared),
-`src/phase1` (perception), `src/phase2` (graph); configs in `config/phase1/` and
-`config/phase2/`. Stack: smp **ResNet baseline → SegFormer advanced**, **OSM labels**.
+Run everything from the project root `~/Desktop/Projects/rr`. Layout: `src/common`
+(shared) · `src/phase1` (perception) · `src/phase2` (graph) · `src/phase3`
+(resilience) · `src/phase4` (dashboard); configs in `config/phase{1,2,3,4}/`.
+Stack: smp **ResNet baseline → SegFormer advanced**, **OSM labels**, **DeepGlobe
+pretrain**. Cross-platform: macOS (MPS) · Windows (CPU) · NVIDIA (CUDA).
+
+> **Note:** the user runs all jobs themselves. Every block below is copy-paste; nothing
+> here is auto-executed.
+
+---
 
 ## 0. Create the env (once)
 ```bash
@@ -10,61 +17,160 @@ cd ~/Desktop/Projects/rr
 micromamba create -f environment.yml -y
 micromamba activate rr
 ```
-VS Code: `Cmd+Shift+P → Python: Select Interpreter → rr`.
+VS Code: `Cmd/Ctrl+Shift+P → Python: Select Interpreter → rr`.
+
+- **macOS (Apple Silicon):** ships a PyTorch MPS build. Prefix runs with
+  `PYTORCH_ENABLE_MPS_FALLBACK=1`.
+- **Windows (CPU dev):** the same file works (`conda`/`mamba` are equivalent to
+  `micromamba`); PyTorch resolves to a CPU build.
+- **NVIDIA GPU (Linux/Windows):** create the env, then swap in a CUDA PyTorch build:
+  ```bash
+  micromamba run -n rr pip install --force-reinstall torch torchvision \
+    --index-url https://download.pytorch.org/whl/cu128   # cu128 for RTX-50/Blackwell; cu124/cu121 otherwise
+  ```
+
+---
 
 ## 1. Smoke test (no data)
+Confirms the install + training loop on a synthetic fixture.
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/smoke.yaml
 ```
 
+---
+
 ## 2. Step 1 — ingest (OSM labels → tiles)
 Inputs wired in `config/phase1/config.yaml → data.liss4`:
-`data/raw/liss4/B2,B3,B4.tif` + `data/raw/aoi/bangalore_urban.shp`.
+`data/raw/liss4/B2,B3,B4.tif` + `data/raw/aoi/blore_urban.shp`.
 ```bash
-# quick test: set  data.liss4.max_tiles: 6  in config/phase1/config.yaml, then:
+# quick test: set  data.liss4.max_tiles: 6  (or a small stride) first, then:
 python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
-# full run: set max_tiles: 0
+# full run: remove the cap
 ```
-→ `data/tiles/*.npz` (bands, ndvi, canopy, **mask**) + `data/band_statistics.csv` + prints `data.norm`.
+→ `data/tiles/*.npz` (bands, ndvi, canopy, **mask**) + `data/band_statistics.csv`
+(prints the `data.norm` mean/std).
 
 ## 3. Wire tiles for training — edit `config/phase1/config.yaml`
 ```yaml
 data:
-  source: tiles
+  source: tiles                 # switch off synthetic
   root: data/tiles
-  norm: { mean: [g,r,nir,ndvi], std: [g,r,nir,ndvi] }   # from Step 2 printout
+  norm:                         # paste the per-channel [G,R,NIR,NDVI] numbers from Step 2
+    mean: [106.059, 95.983, 189.757, 0.322]
+    std:  [21.483, 27.295, 40.894, 0.143]
 ```
+> **Why norm matters:** raw 10-bit DN fed into an ImageNet encoder collapses training.
+> Always paste real `mean`/`std` before a real run.
 
 ## 4. EDA (optional)
 ```bash
 python -m src.phase1.eda.run_eda --config config/phase1/config.yaml
 ```
 
-## 5. Train — baseline (Mac)
-`config/phase1/config.yaml`: `model.arch: smp`, `decoder: unetplusplus`, `encoder: resnet34`.
+---
+
+## 5. Choosing the model — config changes per architecture
+
+**All model selection happens in `config/phase1/config.yaml → model`.** Pick a row,
+set those keys, then run the Step 7 train command. `in_channels: 4` and
+`stem_init: inflate` apply to every smp model (4-ch `[G,R,NIR,NDVI]` input).
+
+| Model | `model.arch` | `model.decoder` | `model.encoder` | extra | batch (MPS / CUDA) |
+|---|---|---|---|---|---|
+| **MiniUNet** (dev/CI, dep-free) | `miniunet` | — | — | `center: none` or `dblock` | 4 / 32 |
+| **Baseline** (smp UNet++ / ResNet34) | `smp` | `unetplusplus` | `resnet34` | `encoder_weights: imagenet` | 4 / 24 |
+| **Advanced** (SegFormer / MiT-B2) | `smp` | `segformer` | `mit_b2` | attention bridges gaps | 2 / 12 |
+| **DINOv3** (optional stretch) | `dinov3` | — | — | see `model.dinov3` block | 2 / 8 |
+
+Baseline (default in the repo):
+```yaml
+model:
+  arch: smp
+  in_channels: 4
+  decoder: unetplusplus
+  encoder: resnet34
+  encoder_weights: imagenet
+  stem_init: inflate
+```
+Advanced — switch to the transformer (SegFormer's long-range attention is the
+"see-through-occlusion" mechanism):
+```yaml
+model:
+  arch: smp
+  in_channels: 4
+  decoder: segformer        # all-MLP SegFormer head (needs smp>=0.4)
+  encoder: mit_b2           # MiT-B2 transformer backbone
+  encoder_weights: imagenet
+  stem_init: inflate
+# also lower train.batch_size (mit_b2 uses ~2x memory): 2 on MPS, ~12 on CUDA.
+```
+
+### Other Phase-1 knobs (same `config.yaml`)
+| Goal | Key | Note |
+|---|---|---|
+| LR schedule | `train.scheduler.name: cosine` | `warmup_epochs`, `min_lr`; or `plateau` / `none` |
+| Early stop | `train.early_stop.enabled: true` | `patience`, `min_delta` (monitors `eval.monitor`) |
+| Unbiased CV | `data.cv.scheme: spatial_block` | `block_size_m` (~1500 m); `random` leaks in one AOI |
+| Push Occlusion-Recall | `loss.canopy_weight: 1.0–3.0` | up-weights BCE on occluded road pixels |
+| Steadier val metric | `eval.tta: true` | D4-flip test-time aug (~4× val cost) |
+| Augmentation | `augment.enabled: true` | occlusion / coarse-dropout / scale / radiometric / copy-paste |
+| Checkpoint metric | `eval.monitor: occlusion_recall` | the headline number; `relaxed_f1` for no-canopy data |
+
+---
+
+## 6. Stage A — DeepGlobe pretraining (optional, recommended)
+Closes the resolution gap: trains a 3-ch RGB road model on DeepGlobe **degraded
+0.5 m → 5.8 m**, then warm-starts the LISS-IV model (stem inflation maps RGB →
+`[G,R,NIR,NDVI]`).
+
+1. Put the DeepGlobe set at `data/raw/deepglobe/` (layout `<id>_sat.jpg` +
+   `<id>_mask.png`; ~6 GB, not shipped).
+2. Confirm `config/phase1/pretrain.yaml → data.deepglobe.root` and the encoder —
+   it ships as **SegFormer / mit_b2**. **Keep the pretrain encoder == your fine-tune
+   encoder** so the warm-start weights transfer cleanly.
+3. Run:
+   ```bash
+   python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+   ```
+   → `runs/train/<ts>/best.pt`.
+4. Warm-start the LISS-IV model — edit `config/phase1/config.yaml`:
+   ```yaml
+   train:
+     init_from: runs/train/<ts>/best.pt   # the pretrain checkpoint
+     init_inflate_stem: true              # 3-ch RGB stem -> 4-ch [G,R,NIR,NDVI]
+   ```
+
+---
+
+## 7. Train the LISS-IV model
+After picking the model (Step 5) and (optionally) warm-start (Step 6):
+
+**macOS (MPS, dev):**
 ```bash
 PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/config.yaml
 ```
-Headline metric = **Occlusion-Recall**; artifacts in `runs/train/<ts>/`.
-
-## 6. Advanced (Transformer) — swap encoder
-`config`: `decoder: segformer` (or unetplusplus), `encoder: mit_b2`. Same command.
-
-## 7. Train on GPU
+**NVIDIA GPU (CUDA, real training)** — `config_gpu.yaml` extends `config.yaml` and
+overrides only the machine knobs (bigger batch/workers/epochs + AMP):
 ```bash
-# on the GPU box, after creating the env, swap in a CUDA torch build:
-micromamba run -n rr pip install --force-reinstall torch torchvision \
-  --index-url https://download.pytorch.org/whl/cu124
-# then run with the GPU config (extends config.yaml):
 python -m src.phase1.train --config config/phase1/config_gpu.yaml
 ```
+> To train the **advanced SegFormer on GPU**: uncomment the `model:` block at the
+> bottom of `config_gpu.yaml` AND set `train.batch_size: 12` (OOM-safe). Otherwise it
+> trains the ResNet34 baseline inherited from `config.yaml`.
+
+Headline metric = **Occlusion-Recall**; artifacts in `runs/train/<ts>/`
+{`best.pt`, `metrics.csv`, `loss_curve`, prediction panel}.
+
+---
 
 ## 8. Export pred_mask.tif (Phase 1 → 2 contract)
 ```bash
 python -m src.phase1.predict --ckpt runs/train/<ts>/best.pt --out data/pred_mask.tif
 # --binary for 0/1 instead of probability
 ```
-Writes a georeferenced full-scene road-probability GeoTIFF (model + norm read from the checkpoint).
+Writes a georeferenced full-scene road GeoTIFF (model + norm read from the checkpoint).
+
+---
 
 ## 9. Phase 2 — graph (config-driven; clean CLI)
 ```bash
@@ -75,10 +181,13 @@ All options live in `config/phase2/config_phase2.yaml → graph`:
   or `null` to auto-build an OSM mask.
 - **mode** — `tiling.enabled: true` (default) processes the **whole scene in blocks**
   (the global heal stitches the seams); set `false` + `window: [row,col,h,w]` for one region.
-- **de-noise a model mask** — raise `min_object_size` / `threshold`.
+- **de-noise a model mask** — raise `min_object_size` / `threshold` (an under-trained
+  over-predicting mask needs higher values, or use the OSM mask for a clean demo).
 
 → `runs/graph/<ts>/`: `graph.graphml` (Phase 3 input), `roads.geojson` (QGIS),
 `metrics.csv` (Connectivity Ratio), and a healing overlay (window/single mode).
+
+---
 
 ## 10. Phase 3 — resilience (config-driven; clean CLI)
 Point the config at a Phase 2 graph, then run:
@@ -88,14 +197,16 @@ python -m src.phase3.resilience.run_resilience --config config/phase3/config_pha
 ```
 Options in `config/phase3/config_phase3.yaml → resilience`: `weight` (travel_time_s),
 `betweenness_k`, `efficiency_samples`, `ablation.{strategies,max_fraction,steps}`.
-Big/slow graph → lower `efficiency_samples`/`betweenness_k`. CPU only.
+Big/slow graph → lower `efficiency_samples` / `betweenness_k`. CPU only.
 
 → `runs/resilience/<ts>/`: `criticality.geojson` (betweenness heatmap), `gatekeepers.csv`,
 `resilience_curves.csv` + `figures/resilience_curves`, `resilience_summary.csv` (Resilience Index).
 
+---
+
 ## 11. Phase 4 — dashboard (Streamlit + Leaflet)
 
-**One-time: install Phase 4 deps** (if env already existed before Phase 4 was added):
+**One-time: install Phase 4 deps** (if the env predates Phase 4):
 ```bash
 micromamba activate rr
 pip install "streamlit>=1.32" "folium>=0.17" "streamlit-folium>=0.22" "plotly>=5.20"
@@ -103,17 +214,16 @@ pip install "streamlit>=1.32" "folium>=0.17" "streamlit-folium>=0.22" "plotly>=5
 
 **Run** (always from project root):
 ```bash
-micromamba activate rr
 streamlit run src/phase4/dashboard.py
 ```
 Opens at `http://localhost:8501`. The sidebar auto-discovers every Phase 3 run in
 `runs/resilience/`.
 
-**Enable the Flood Simulator**: edit `config/phase4/config_phase4.yaml` and set
-`dashboard.graph_path` to the Phase 2 graph you want to stress-test:
+**Enable the Flood Simulator** — edit `config/phase4/config_phase4.yaml`:
 ```yaml
 dashboard:
-  graph_path: runs/graph/<ts>/graph.graphml
+  graph_path: runs/graph/<ts>/graph.graphml   # the Phase 2 graph to stress-test
+  max_map_nodes: 5000                          # cap on Leaflet nodes (top-N by betweenness)
 ```
 
 → Four tabs: **Criticality Map** (Leaflet, nodes coloured by betweenness),
@@ -123,15 +233,19 @@ dashboard:
 
 ---
 
-## Mac ↔ GPU at a glance
-| knob | Mac (MPS, dev) | GPU (CUDA, train) |
-|---|---|---|
-| config | `config/phase1/config.yaml` | `config/phase1/config_gpu.yaml` |
-| `train.batch_size` | 2–4 | 16–32 |
-| `train.num_workers` | 0 | 4–8 |
-| `train.amp` | no-op | true |
-| env var | `PYTORCH_ENABLE_MPS_FALLBACK=1` | — |
+## Platform & batch-size at a glance
+| knob | macOS (MPS, dev) | Windows (CPU, dev) | NVIDIA (CUDA, train) |
+|---|---|---|---|
+| Phase-1 config | `config/phase1/config.yaml` | `config/phase1/config.yaml` | `config/phase1/config_gpu.yaml` |
+| `train.batch_size` (ResNet34) | 2–4 | 1–2 | 16–32 |
+| `train.batch_size` (mit_b2) | 2 | 1 | ~12 |
+| `train.num_workers` | 0 | 0 | 4–8 |
+| `train.amp` | no-op | no-op | true |
+| env var | `PYTORCH_ENABLE_MPS_FALLBACK=1` | — | — |
 
 ## Notes
-- Step 1 (ingest) is CPU/geo — runs on Mac, no GPU needed.
-- `data/` + `runs/` live at the repo root (shared) — relative paths in configs resolve when run from root.
+- Step 1 (ingest), Phase 2, Phase 3, Phase 4 are CPU/geo — no GPU needed; only Phase 1
+  training benefits from CUDA.
+- `data/` + `runs/` live at the repo root (shared) — relative paths in configs resolve
+  when you run from the root.
+- Keep the **pretrain encoder == fine-tune encoder** so warm-start weights transfer.

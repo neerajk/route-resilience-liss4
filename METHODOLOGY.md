@@ -19,15 +19,17 @@ occlusion cue.
 | Tier | Model | Role | Status |
 |---|---|---|---|
 | **Baseline** | smp UNet++ / **ResNet34** (stem-inflated) | guaranteed result | **trained** (OccRec ≈ 0.39, 3-epoch) |
-| **Advanced** | smp **SegFormer / MiT** (`mit_b2`) — Transformer/attention | context-aware | wired, not yet run |
+| **Advanced** | smp **SegFormer / MiT** (`mit_b2`) — Transformer/attention | context-aware | wired (pretrain config ships with `mit_b2`) |
 | dev/CI | MiniUNet (dep-free, optional D-LinkNet center) | smoke tests | runs |
 | optional | DINOv3-SAT-493M (timm) | stretch arm | optional |
 
 **Input stack = 4-channel `[G, R, NIR, NDVI]`** (CHM dropped). Labels = **OSM**
-(auto-rasterized — zero manual labelling). Pretraining = **DeepGlobe** (downsampled).
+(auto-rasterized — zero manual labelling). Pretraining = **DeepGlobe** (0.5 m → 5.8 m
+blur-downsample; RGB → 4-ch warm-start via stem inflation — `src/phase1/pretrain.py`).
 
 Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph in
-`src/phase2/`.
+`src/phase2/`, resilience in `src/phase3/`, dashboard in `src/phase4/`. Runs cross-platform
+(macOS MPS · Windows CPU · NVIDIA CUDA, `cu128` for Blackwell/RTX-50).
 
 ---
 
@@ -70,6 +72,14 @@ Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph
 
 ## 1. Step-by-step pipeline (input → operation → output)
 
+### Step 0 — (optional) DeepGlobe pretraining — Stage A  (`src/phase1/pretrain.py`) ✅ built
+- *In:* DeepGlobe Road Extraction set (0.5 m RGB + road masks) at `data/raw/deepglobe/`.
+- *Op:* **degrade 0.5 m → 5.8 m** with the sensor-realistic blur-downsample, then run the
+  full `train.run` machinery in 3-ch RGB (`config/phase1/pretrain.yaml`, monitored on
+  relaxed-F1 since DeepGlobe has no canopy). Closes the *resolution* gap; the *spectral*
+  gap (RGB→G/R/NIR) is closed at fine-tune time by warm-start stem inflation.
+- *Out:* `runs/train/<ts>/best.pt` → set `train.init_from` in `config/phase1/config.yaml`.
+
 ### Step 1 — Ingest → OSM-labelled tiles  (`src/phase1/preprocess/ingest_liss4.py`) ✅ built+run
 - *In:* LISS-IV B2/B3/B4 GeoTIFFs + AOI shapefile.
 - *Op:* reference grid = Green band (CRS/transform); Red/NIR aligned via WarpedVRT;
@@ -82,12 +92,17 @@ Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph
 - *Op:* per-channel standardise raw DN via `cfg.data.norm.{mean,std}`. → standardised input.
 
 ### Step 3 — Augment (train only)  (`src/phase1/data/augment.py`)
-- *Op:* canopy-driven **OcclusionAugment** (hide roads under canopy → teaches gap
-  inference), **ScaleAugment** (MTF blur-downsample), albumentations. → harder tiles.
+- *Op:* a composable suite (config `augment.*`): **OcclusionAugment** (canopy-driven —
+  hide roads under canopy → teaches gap inference), **RoadCoarseDropout** (mask road
+  patches → occlusion recovery), **ScaleAugment** (MTF blur-downsample, GSD jitter),
+  **RadiometricJitter** (per-band gain/bias), **CopyPasteRoads** (graft road patches),
+  **PhotometricGeometric** (albumentations flips/rotations). → harder, more varied tiles.
 
 ### Step 4 — Model forward  (`src/phase1/models/factory.py`)
 - *Baseline:* smp encoder (ImageNet, **stem inflated** to 4-ch — RGB conv1 copied to
   G/R/NIR, mean-init NDVI; Carreira & Zisserman 2017) → decoder → logits `[1,H,W]`.
+  When `train.init_from` is set, the DeepGlobe-pretrained 3-ch stem is **inflated**
+  to the 4-ch `[G,R,NIR,NDVI]` input (warm-start).
 - *Advanced:* swap encoder to **`mit_b2`** (SegFormer) — long-range attention is the
   "see through occlusion" mechanism. Optional D-LinkNet **Dblock** center.
 
@@ -97,9 +112,13 @@ Code layout: shared helpers in `src/common/`, perception in `src/phase1/`, graph
   missed *occluded* roads → pushes Occlusion-Recall.
 
 ### Step 6 — Train + validate  (`src/phase1/train.py`)
-- *Op:* AdamW; CUDA AMP+GradScaler (no-op on MPS). Validation metrics pooled over
-  **global pixel counts** (unbiased): IoU, Dice, **Occlusion-Recall** (headline),
-  relaxed IoU/F1 at 3–5 px. Checkpoint on best Occlusion-Recall.
+- *Op:* AdamW; CUDA AMP+GradScaler (no-op on MPS); **cosine LR + linear warmup**
+  (or plateau) and **early-stop** on the monitored metric (`train.scheduler` /
+  `train.early_stop`). **Spatial-block CV** (`cv.scheme: spatial_block`, Roberts 2017)
+  holds out whole spatial blocks to stop the autocorrelation leak a random/contiguous
+  split causes. Validation metrics pooled over **global pixel counts** (unbiased):
+  IoU, Dice, **Occlusion-Recall** (headline), relaxed IoU/F1 at 3–5 px; optional **D4
+  test-time augmentation** (`eval.tta`). Checkpoint on the best monitored metric.
 - *Out:* `runs/train/<ts>/` {best.pt, metrics.csv, loss_curve, prediction panel}.
 
 ### Step 7 — Export (the Phase 1→2 contract)  ✅ `src/phase1/predict.py`
@@ -153,14 +172,16 @@ phase consumes only the previous phase's artifact, so work parallelises.
 - **Generalisation:** leave-one-terrain-out (needs ≥2 terrains).
 - Report **mean ± std over spatial-block folds** (Roberts 2017).
 
-## 4. Status & outstanding
-- ✅ Phase 1 Step 1 ingest (OSM labels) + baseline trained on real data (OccRec ≈ 0.39).
+## 4. Status & outstanding  (all four phases merged to `main`)
+- ✅ Phase 1 ingest (OSM labels) + baseline trained on real data (OccRec ≈ 0.39, pre-upgrade).
+- ✅ Phase 1 training stack: **augmentation suite, spatial-block CV, cosine LR + warmup +
+  early-stop, TTA, DeepGlobe pretrain (warm-start stem inflation)** — all built; Windows/CPU + NVIDIA ready.
 - ✅ Export `pred_mask.tif` (`src/phase1/predict.py`) — the Phase 1→2 contract.
 - ✅ Phase 2 graph (`src/phase2/graph/`) — mask → skeleton → **tiled** graph → heal → export.
-- ⬜ Improve the model so `pred_mask.tif` is vectorizable: spatial-block CV, LR
-  scheduler + early-stop + more epochs, DeepGlobe pretrain, SegFormer, augmentation.
 - ✅ Phase 3 — resilience (`src/phase3/resilience/`): betweenness → ablation → Resilience Index.
 - ✅ Phase 4 — Streamlit/Leaflet/Plotly dashboard (`src/phase4/dashboard.py`).
+- ⬜ **Run** the upgraded training stack end-to-end (pretrain → fine-tune, SegFormer) to
+  produce a vectorizable `pred_mask.tif`, then Phases 2→3→4 on the real graph.
 - ⏸ Parked: CHM/DINOv3/Clay/distillation, OCOI, Sentinel-2.
 
 > Note: where OSM already covers the area, the model's value is **generalisation**
