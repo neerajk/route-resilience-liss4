@@ -28,7 +28,7 @@ import numpy as np
 
 def _load_config(path: str) -> dict:
     import yaml
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -230,7 +230,7 @@ def ingest(cfg: dict) -> Path:
     stats_csv = Path(lc.get("stats_csv", "data/band_statistics.csv"))
     stats_csv.parent.mkdir(parents=True, exist_ok=True)
     import csv
-    with open(stats_csv, "w", newline="") as f:
+    with open(stats_csv, "w", newline="", encoding="utf-8") as f:
         wcsv = csv.writer(f); wcsv.writerow(["channel", "mean", "std", "count"])
         for k in names:
             wcsv.writerow([k, f"{means[k]:.6f}", f"{stds[k]:.6f}", cnt[k]])

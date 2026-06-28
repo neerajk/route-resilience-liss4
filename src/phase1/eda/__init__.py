@@ -1,1 +1,1 @@
-# EDA package. Entry point: python -m src.eda.run_eda --config config/config.yaml
+# EDA package. Entry point: python -m src.phase1.eda.run_eda --config config/phase1/config.yaml

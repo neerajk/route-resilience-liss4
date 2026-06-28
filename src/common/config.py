@@ -17,12 +17,17 @@ def deep_merge(base: dict, over: dict) -> dict:
 
 
 def load_config(path: str) -> dict:
-    """Load YAML, resolving a `extends:` base (relative to this file's dir)."""
+    """Load YAML, resolving an `extends:` base (relative to this file's dir).
+
+    `extends` is resolved RECURSIVELY, so multi-level chains work: e.g.
+    config_gpu.yaml extends config.yaml (and a child could extend config_gpu.yaml in
+    turn) — each level deep-merges over the fully-resolved one below it (nearest
+    override wins)."""
     import yaml
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         cfg = yaml.safe_load(f) or {}
     base = cfg.pop("extends", None)
     if base:
-        with open(Path(path).parent / base) as bf:
-            cfg = deep_merge(yaml.safe_load(bf) or {}, cfg)
+        base_cfg = load_config(str(Path(path).parent / base))   # resolve base's own extends too
+        cfg = deep_merge(base_cfg, cfg)
     return cfg

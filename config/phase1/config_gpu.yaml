@@ -1,8 +1,15 @@
 # =============================================================================
-# rr — GPU (CUDA) training config. Inherits EVERYTHING from config.yaml and
-# overrides only the machine-dependent knobs below. Run:
-#   python -m src.train --config config/config_gpu.yaml
-# (device-dynamic: runtime.device=auto picks CUDA on the GPU box automatically.)
+# rr — GPU / real-training config.
+#
+# USE: real training on a CUDA GPU. Inherits EVERYTHING from config.yaml (model,
+# data, normalization, LR schedule, early-stop, spatial-block CV, augmentation)
+# and overrides only the machine knobs (bigger batch/workers/epochs + AMP).
+#   python -m src.phase1.train --config config/phase1/config_gpu.yaml
+# device-dynamic: runtime.device=auto picks CUDA automatically.
+#
+# ARCHITECTURE: defaults to the ResNet34 baseline (from config.yaml). To train the
+# ADVANCED SegFormer / MiT-B2 transformer instead (attention bridges canopy gaps),
+# UNCOMMENT the `model:` block at the bottom AND set train.batch_size: 12 below.
 # =============================================================================
 extends: config.yaml      # single source of truth = config.yaml
 
@@ -11,7 +18,7 @@ runtime:
 
 train:
   epochs: 60              # real run (raise as needed)
-  batch_size: 24          # GPU memory permitting (16-32)
+  batch_size: 24          # ResNet34: 16-32. For SegFormer/mit_b2 use ~12 (≈2x memory).
   num_workers: 8          # 4-8 on CUDA/cloud
   amp: true               # mixed precision + GradScaler (CUDA only)
   lr: 0.001
@@ -19,3 +26,14 @@ train:
 
 loss:
   cldice_iters: 10        # GPU has memory; full topology term
+
+# ---- ADVANCED: SegFormer (MiT-B2 transformer) ------------------------------- #
+# To train the transformer instead of the ResNet baseline:
+#   1. uncomment the block below, 2. set train.batch_size: 12 above (OOM-safe).
+# Keep encoder == your DeepGlobe-pretrain encoder so warm-start weights transfer.
+# model:
+#   arch: smp
+#   decoder: segformer        # all-MLP SegFormer head (smp.Segformer; needs smp>=0.4)
+#   encoder: mit_b2           # MiT-B2 transformer backbone (attention)
+#   encoder_weights: imagenet # ImageNet-pretrained MiT; stem inflated 3->in_channels
+#   stem_init: inflate

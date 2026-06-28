@@ -20,7 +20,7 @@ Works on BOTH:
 OUTPUTS (under cfg.paths.runs / 'eda/<timestamp>'):
   eda_report.md · band_statistics.csv · class_balance.csv · figures/*.{pdf,png}
 
-Run:  python -m src.eda.run_eda --config config/config.yaml
+Run:  python -m src.phase1.eda.run_eda --config config/phase1/config.yaml
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from ...common.viz import save_fig, set_pub_style
 
 def _load_config(path: str) -> dict:
     import yaml
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -223,7 +223,7 @@ def run(cfg: dict) -> Path:
         "## References",
         "- Rouse et al. (1974) NDVI; Milletari et al. (2016) Dice; Shit et al. (2021) clDice.",
     ]
-    (out / "eda_report.md").write_text("\n".join(lines))
+    (out / "eda_report.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"[EDA] source={src} labels={has_labels} | "
           f"report + {len(list(fig_dir.glob('*.png')))} figures -> {out}")
     return out
