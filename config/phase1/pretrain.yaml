@@ -18,7 +18,8 @@ runtime:
 
 data:
   source: deepglobe
-  channels: [red, green, blue]   # 3-ch RGB (DeepGlobeDataset returns RGB directly)
+  channels: [green, red, blue]   # band ORDER (not plain RGB): G,R aligned with LISS-IV
+                                 # [green,red,...] so warm-start maps G->G, R->R (Blue->NIR slot)
   tile_size: 256
   norm:
     mean: null                   # RGB already in [0,1]; no standardisation
@@ -38,8 +39,10 @@ model:
   arch: smp
   in_channels: 3                 # RGB pretrain; warm-start inflates 3 -> 4 for LISS-IV
   classes: 1
-  decoder: unetplusplus          # match your LISS-IV baseline (or segformer for the advanced path)
-  encoder: resnet34              # keep == target encoder so weights transfer cleanly
+  decoder: segformer        # all-MLP SegFormer head (smp.Segformer; needs smp>=0.4)
+  #unetplusplus          # match your LISS-IV baseline (or segformer for the advanced path)
+  encoder: mit_b2           # MiT-B2 transformer backbone (attention)
+  #resnet34              # keep == target encoder so weights transfer cleanly
   encoder_weights: imagenet
   stem_init: smp_default         # already 3-ch; no inflation needed at pretrain time
 

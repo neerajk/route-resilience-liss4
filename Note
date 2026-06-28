@@ -1,0 +1,73 @@
+STEP 1:
+
+Step-by-step (VS Code integrated terminal)
+
+1. Create + activate the env (geo stack — takes a few minutes)
+cd ~/Desktop/Projects/rr
+micromamba create -f environment.yml -y
+micromamba activate rr
+Then Cmd+Shift+P → Python: Select Interpreter → rr.
+
+2. Smoke test the install (no data needed)
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.train --config config/smoke.yaml
+Should write runs/train/<ts>/ with artifacts. Confirms torch+smp+pipeline work.
+
+3. Step 1 — ingest (OSM labels → tiles) — config already points at your data/raw/liss4/B2–B4.tif + data/raw/aoi/bangalore_urban.shp
+# quick test: set  data.liss4.max_tiles: 6  in config/config.yaml, then:
+python -m src.preprocess.ingest_liss4 --config config/config.yaml
+# full run: set max_tiles back to 0
+→ data/tiles/*.npz (with mask) + data/band_statistics.csv + it prints data.norm.
+
+4. Wire the tiles for training — edit config/config.yaml:
+data:
+  source: tiles
+  root: data/tiles
+  norm: { mean: [...], std: [...] }   # paste from Step 3 printout
+
+5. EDA (optional sanity)
+python -m src.eda.run_eda --config config/config.yaml
+
+6. Train the baseline (Mac first, tiny)
+PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.train --config config/config.yaml
+
+Mac → GPU: how it's handled (your question)
+
+Three layers, all already in place — you only ever edit config values, never code:
+
+① Code is device-dynamic. runtime.device: auto → picks CUDA if present, else MPS, else CPU. AMP + GradScaler auto-activate only on CUDA. Zero code change between machines.
+
+② Env is one swap. Same environment.yml on both. On the GPU box, after create, swap the Torch build:
+micromamba run -n rr pip install --force-reinstall torch torchvision \
+  --index-url https://download.pytorch.org/whl/cu124   # match the box's CUDA
+The geo stack (gdal/rasterio/osmnx) is identical on both.
+
+③ Per-machine config knobs (the only thing you change):
+
+┌───────────────────────────────┬────────────────┬───────────────────┐
+│             knob              │ Mac (MPS, dev) │ GPU (CUDA, train) │
+├───────────────────────────────┼────────────────┼───────────────────┤
+│ runtime.device                │ auto           │ auto              │
+├───────────────────────────────┼────────────────┼───────────────────┤
+│ train.batch_size              │ 2–4            │ 16–32             │
+├───────────────────────────────┼────────────────┼───────────────────┤
+│ train.num_workers             │ 0              │ 4–8               │
+├───────────────────────────────┼────────────────┼───────────────────┤
+│ train.amp                     │ (no-op)        │ true              │
+├───────────────────────────────┼────────────────┼───────────────────┤
+│ PYTORCH_ENABLE_MPS_FALLBACK=1 │ yes            │ not needed        │
+└───────────────────────────────┴────────────────┴───────────────────┘
+
+Recommended pattern: keep config/config.yaml (Mac defaults) and a config/config_gpu.yaml (big batch/workers/amp), and just pass --config config/config_gpu.yaml on the GPU box. Ingest/Step 1 runs on either (it's CPU/geo, no GPU needed).
+
+So: develop + Step 1 + smoke-train on the Mac; move to GPU by swapping the torch build and pointing at the GPU config. The pipeline auto-detects the device.
+
+
+
+PHASE 2
+
+Run it (clean, config-driven)
+
+python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml
+Default config = mask: null (builds the OSM mask) + tiling.enabled: true → tiles the whole city → heals → exports runs/graph/<ts>/{graph.graphml, roads.geojson, metrics.csv}.
+
+Tip: to skip rebuilding the OSM mask each run, set graph.mask: to the osm_mask.tif from your earlier run (e.g. runs/graph/20260627_235729/osm_mask.tif).

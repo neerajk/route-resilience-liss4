@@ -86,24 +86,86 @@ train:
 Accepts our `{"model": ...}` checkpoints, Lightning `{"state_dict": ...}`, or a raw
 state_dict. This is the hook the DeepGlobe pretrain (below) plugs into.
 
-## 6b. DeepGlobe pretraining (0.5 m → 5.8 m → warm-start)
-Pretrain a 3-ch RGB road model on DeepGlobe, degraded to the LISS-IV GSD, then
-warm-start the LISS-IV model from it. DeepGlobe is just another `data.source`, so
-this reuses the whole training pipeline.
-```bash
-# 0) put DeepGlobe at data/raw/deepglobe (standard layout <id>_sat.jpg + <id>_mask.png)
-#    Road-Extraction track, ~6 GB; e.g. Kaggle balraj98/deepglobe-road-extraction-dataset.
-#    Set the path in config/phase1/pretrain.yaml -> data.deepglobe.root.
-# 1) pretrain (degrades 0.5 m -> 5.8 m via the MTF blur-downsample, monitors relaxed-F1):
-python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
-#    -> runs/train/<ts>/best.pt   (RGB, in_channels=3)
-# 2) warm-start LISS-IV training: set train.init_from to that best.pt in config.yaml, then:
-python -m src.phase1.train --config config/phase1/config.yaml
+## 6b. DeepGlobe pretraining → warm-start → train (full recipe)
+
+**What this does, in plain terms:** road shapes look the same everywhere, so we first
+teach the model "what a road looks like" on the big DeepGlobe dataset, then move that
+knowledge to our LISS-IV model and fine-tune it on our actual data. Result: a better
+starting point than ImageNet alone.
+
+**The chain (there are TWO warm-starts — this trips people up):**
 ```
-The 3-ch→4-ch stem inflation is automatic (`init_inflate_stem: true`). Tune the
-encoder in `pretrain.yaml` to match your target (`resnet34` baseline / `mit_b2`
-advanced) so weights transfer cleanly. Windows: the DeepGlobe image-IO path sets
-`KMP_DUPLICATE_LIB_OK=TRUE` for you (torch/skimage OpenMP clash).
+ImageNet  --(encoder_weights: imagenet)-->  DeepGlobe pretrain (RGB, 0.5->5.8 m)
+          --(train.init_from = that best.pt)-->  LISS-IV fine-tune (4-ch G/R/NIR/NDVI)
+```
+- Stage 1 is warm-started from **ImageNet** (automatic).
+- Stage 2 is warm-started from **your Stage-1 checkpoint** (you set `init_from`).
+
+> ⚠️ **THE ONE RULE: the pretrain architecture must MATCH the fine-tune architecture**
+> (same `encoder` AND `decoder`). Weights transfer by name+shape — mismatch ⇒ nothing
+> transfers. This recipe uses the **advanced** model (`mit_b2` / `segformer`) on both
+> sides. (For the ResNet baseline, use `resnet34` / `unetplusplus` on both instead.)
+
+### Step 0 — data in place
+- DeepGlobe at `data/raw/deepglobe/` (standard layout `<id>_sat.jpg` + `<id>_mask.png`;
+  only the `train/` split has masks). Road-Extraction track, ~6 GB — e.g. Kaggle
+  `balraj98/deepglobe-road-extraction-dataset`.
+- LISS-IV tiles already at `data/tiles/` (from Step 2) and `data.norm` set (Step 3).
+
+### Step 1 — pretrain on DeepGlobe (mit_b2 / SegFormer)
+Edit `config/phase1/pretrain.yaml` so the model **matches your target**:
+```yaml
+model:
+  decoder: segformer       # match the LISS-IV model
+  encoder: mit_b2          # match the LISS-IV model
+  encoder_weights: imagenet
+  in_channels: 3           # DeepGlobe is RGB
+  stem_init: smp_default
+train:
+  batch_size: 12           # mit_b2 ~2x memory; drop to 8/4 if CUDA OOM
+data:
+  deepglobe:
+    root: data/raw/deepglobe
+    limit: 0               # 0 = all. TIP: use 200 for a fast first dry-run.
+```
+Run it:
+```bash
+python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+```
+→ writes `runs/train/<timestamp>/best.pt`. **Copy that path** — Step 2 needs it.
+Sanity at start: log shows `encoder=mit_b2 decoder=segformer in_ch=3`,
+`monitor=relaxed_f1`, and `normalization: OFF` (correct — RGB is already 0–1).
+
+### Step 2 — fine-tune on LISS-IV, warm-started from Step 1
+In `config/phase1/config_gpu.yaml`: uncomment the SegFormer `model:` block, set
+`train.batch_size: 12`, and add the warm-start (paste your Step-1 path):
+```yaml
+train:
+  batch_size: 12
+  init_from: runs/train/<timestamp>/best.pt   # <- from Step 1
+  init_inflate_stem: true                      # inflate 3-ch RGB stem -> 4-ch [G,R,NIR,NDVI]
+model:
+  encoder_weights: null    # optional: init_from supplies the encoder, skip the ImageNet redownload
+```
+Run training:
+```bash
+python -m src.phase1.train --config config/phase1/config_gpu.yaml
+```
+
+### Step 3 — confirm it actually warm-started (read the first ~10 log lines)
+- ✅ `normalization: ON` and `in_ch=4`.
+- ✅ a line like `[warm-start] ... loaded N tensors verbatim + inflated 1 stem conv(s)`
+  and `inflate encoder...conv1: RGB(3) -> 4ch`. That's proof the DeepGlobe weights moved over.
+- ❌ `[warm-start] ... loaded 0 tensors` ⇒ **architecture mismatch** — your `pretrain.yaml`
+  wasn't `mit_b2/segformer`. Fix Step 1 and re-run.
+
+### Notes
+- **First-timer tip:** do a tiny dry run first — `data.deepglobe.limit: 200` + a few
+  epochs in Step 1 — to confirm the whole chain end-to-end before the multi-hour run.
+- **Does it help?** Also train Step 2 once with `init_from: null` (ImageNet-only) and
+  compare Occlusion-Recall. That ablation is what justifies the pretrain.
+- Windows: the DeepGlobe image-IO path sets `KMP_DUPLICATE_LIB_OK=TRUE` for you
+  (torch/skimage OpenMP clash) — no action needed.
 
 ## 7. Train on GPU
 ```bash

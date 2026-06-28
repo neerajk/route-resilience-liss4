@@ -86,6 +86,7 @@ def _datasets(cfg: dict, norm):
                       target_gsd_m=float(dg.get("target_gsd_m", 5.8)),
                       sat_suffix=dg.get("sat_suffix", "_sat.jpg"),
                       mask_suffix=dg.get("mask_suffix", "_mask.png"),
+                      channels=channels,                          # band order (default G,R,B; LISS-IV-aligned)
                       limit=int(dg.get("limit", 0)), norm=norm)
         train_full = DeepGlobeDataset(augment=aug, **common)
         val_full = DeepGlobeDataset(augment=None, **common)   # never augment validation

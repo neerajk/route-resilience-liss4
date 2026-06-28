@@ -43,6 +43,10 @@ def _imread(path: Path) -> np.ndarray:
     return np.asarray(imread(str(path)))
 
 
+# DeepGlobe JPEGs decode as R,G,B in this fixed order.
+_DG_SRC_IDX = {"red": 0, "green": 1, "blue": 2}
+
+
 class DeepGlobeDataset(Dataset):
     """DeepGlobe tiles degraded to ``target_gsd_m`` then resized to ``tile_size``.
 
@@ -54,6 +58,13 @@ class DeepGlobeDataset(Dataset):
     sat_suffix, mask_suffix : filename suffixes locating the pair.
     mtf_at_nyquist : sensor sharpness for the blur-downsample (lower = blurrier).
     limit : cap the number of pairs (0 = all; small values for quick tests).
+    channels : output band ORDER, selected from DeepGlobe's R/G/B. Default
+        ``("green", "red", "blue")`` — NOT plain RGB — so the two bands DeepGlobe
+        shares with LISS-IV (Green, Red) land on the SAME first two positions as the
+        LISS-IV stack ``[green, red, nir, ndvi]``. That way the warm-start's 3→4ch
+        stem inflation copies Green→Green and Red→Red (instead of swapping them);
+        DeepGlobe's Blue maps onto the LISS-IV NIR slot (the one unavoidable
+        cross-sensor mismatch — DeepGlobe has no NIR), and NDVI is mean-initialised.
     augment, norm : same hooks as the other datasets (norm usually None: RGB∈[0,1]).
     """
 
@@ -61,7 +72,7 @@ class DeepGlobeDataset(Dataset):
                  source_gsd_m: float = 0.5, target_gsd_m: float = 5.8,
                  sat_suffix: str = "_sat.jpg", mask_suffix: str = "_mask.png",
                  mtf_at_nyquist: float = 0.2, limit: int = 0,
-                 channels: Sequence[str] = ("red", "green", "blue"),
+                 channels: Sequence[str] = ("green", "red", "blue"),
                  augment: Optional[Callable] = None, norm: Norm = None) -> None:
         self.root = Path(root)
         self.ts = int(tile_size)
@@ -69,6 +80,7 @@ class DeepGlobeDataset(Dataset):
         self.mask_suffix = mask_suffix
         self.mtf = float(mtf_at_nyquist)
         self.channels = tuple(channels)
+        self._band_idx = [_DG_SRC_IDX[c] for c in self.channels]   # reorder R,G,B -> requested
         self.augment = augment
         self.norm = norm
         # pair each *_sat with its *_mask; skip images that have no mask (valid/test)
@@ -103,6 +115,7 @@ class DeepGlobeDataset(Dataset):
         if sat.ndim == 2:                                   # grayscale -> 3-ch
             sat = np.repeat(sat[..., None], 3, axis=2)
         sat = sat[..., :3] / 255.0                          # RGB in [0,1]
+        sat = sat[..., self._band_idx]                      # -> channel order (default G,R,B)
 
         m = _imread(mask_p).astype(np.float32)
         if m.ndim == 3:                                     # RGB mask -> luminance
