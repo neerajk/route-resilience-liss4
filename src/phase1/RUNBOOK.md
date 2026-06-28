@@ -109,8 +109,26 @@ ImageNet  --(encoder_weights: imagenet)-->  DeepGlobe pretrain (RGB, 0.5->5.8 m)
 ### Step 0 — data in place
 - DeepGlobe at `data/raw/deepglobe/` (standard layout `<id>_sat.jpg` + `<id>_mask.png`;
   only the `train/` split has masks). Road-Extraction track, ~6 GB — e.g. Kaggle
-  `balraj98/deepglobe-road-extraction-dataset`.
+  `balraj98/deepglobe-road-extraction-dataset`. The loader globs `data.deepglobe.root`
+  **recursively** and auto-skips images without a mask (so `valid/`+`test/` are ignored).
 - LISS-IV tiles already at `data/tiles/` (from Step 2) and `data.norm` set (Step 3).
+
+**Wiring a downloaded Kaggle archive into place.** Say the archive extracted to
+`D:\some\path\archive\` with `train/ valid/ test/`. You only need `train/` under
+`data/raw/deepglobe/`. Pick one (data/ is gitignored, so none of this is committed):
+```powershell
+# Windows — directory junction (instant, no copy, keeps the archive intact):
+New-Item -ItemType Junction -Path data\raw\deepglobe\train -Target D:\some\path\archive\train
+```
+```bash
+# macOS/Linux — symlink (instant) OR move:
+ln -s /some/path/archive/train data/raw/deepglobe/train      # symlink
+# mv /some/path/archive/train data/raw/deepglobe/train       # or move
+```
+Verify the loader sees the pairs (expect ~6226):
+```bash
+python -c "from src.phase1.data.deepglobe import DeepGlobeDataset as D; print(len(D(root='data/raw/deepglobe')), 'pairs')"
+```
 
 ### Step 1 — pretrain on DeepGlobe (mit_b2 / SegFormer)
 Edit `config/phase1/pretrain.yaml` so the model **matches your target**:

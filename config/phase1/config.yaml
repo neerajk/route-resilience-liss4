@@ -147,7 +147,7 @@ loss:
     cldice: 0.3
   # Canopy-weighted BCE (your idea): penalise missing OCCLUDED roads more.
   # effective pixel weight = 1 + canopy_weight * canopy_mask.  0 disables.
-  canopy_weight: 0.0  # try 1.0-3.0 to push Occlusion-Recall
+  canopy_weight: 1.5  # try 1.0-3.0 to push Occlusion-Recall
 
 train:
   epochs: 50          # real run; raise to 40-60. (smoke.yaml stays tiny; CPU dev can lower)
@@ -175,7 +175,8 @@ train:
   # shape-checked: matches copied, mismatches reported & skipped). Point at a
   # DeepGlobe/RGB-pretrained model to warm-start; init_inflate_stem inflates a
   # 3-ch RGB stem onto [G,R,NIR,NDVI] (I3D). null => train from initialisation.
-  init_from: null               # e.g. runs/pretrain/<ts>/best.pt
+ #init_from: runs/train/segformer-mit_b2_pretrain_20260628_123245/best.pt   # DeepGlobe pretrain ckpt
+ 
   init_inflate_stem: true
 
 eval:
