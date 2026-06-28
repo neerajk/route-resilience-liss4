@@ -1,5 +1,6 @@
 {
-  "// note": "Point this at your micromamba env python. Find it: micromamba run -n rr which python",
+  "// note": "Point this at your env python. Find it: micromamba run -n rr which python (macOS/Linux) | (Get-Command python).Source after 'micromamba activate rr' (Windows).",
+  "// note-windows": "On Windows the interpreter is typically %USERPROFILE%\\micromamba\\envs\\rr\\python.exe (or ...\\Scripts\\python.exe). VS Code resolves the per-OS path below.",
   "python.defaultInterpreterPath": "~/micromamba/envs/rr/bin/python",
   "python.terminal.activateEnvironment": true,
   "terminal.integrated.env.osx": {
@@ -7,6 +8,9 @@
   },
   "terminal.integrated.env.linux": {
     "PYTORCH_ENABLE_MPS_FALLBACK": "1"
+  },
+  "terminal.integrated.env.windows": {
+    "// note": "MPS is macOS-only; this var is harmless on Windows (CPU, or CUDA if a CUDA torch build is installed)."
   },
   "files.exclude": {
     "**/__pycache__": true,

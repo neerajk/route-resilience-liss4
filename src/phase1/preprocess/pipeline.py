@@ -27,7 +27,7 @@ from typing import Dict
 
 def _load_config(path: str) -> dict:
     import yaml
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -122,7 +122,7 @@ def build_tiles(cfg: dict, dry_run: bool = False) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Phase I preprocessing")
-    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--config", default="config/phase1/config.yaml")
     ap.add_argument("--dry-run", action="store_true", help="print plan, fetch nothing")
     args = ap.parse_args()
     build_tiles(_load_config(args.config), dry_run=args.dry_run)

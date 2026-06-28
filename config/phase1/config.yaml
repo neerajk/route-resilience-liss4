@@ -53,9 +53,10 @@ data:
   # Synthetic tiles are already in [0,1] => leave null (no-op). For REAL LISS-IV
   # 10-bit DN you MUST set per-channel mean/std (run EDA band_statistics first).
   norm:
-    # >>> USER INPUT (real data): per-channel [green,red,nir,ndvi,chm]
-    mean: null            # e.g. [128.0, 110.0, 320.0, 0.2, 4.0]
-    std:  null            # e.g. [ 60.0,  55.0, 140.0, 0.3, 6.0]
+    # per-channel [green, red, nir, ndvi] — from data/band_statistics.csv (Step 2 ingest).
+    # REQUIRED for real 10-bit DN: raw DN into an ImageNet encoder collapses training.
+    mean: [106.059, 95.983, 189.757, 0.322]
+    std:  [21.483, 27.295, 40.894, 0.143]
 
   # ---- spatial-block cross-validation (Roberts et al. 2017) -------------- #
   # Random tile splits LEAK in a single contiguous AOI => inflated metrics.
@@ -69,9 +70,9 @@ data:
   # Point at the .npz tiles produced by ingest_liss4 (below). >>> USER INPUT <<<
   root: data/tiles
 
-  # ---- LISS-IV ingestion (src/preprocess/ingest_liss4.py) --------------- #
+  # ---- LISS-IV ingestion (src/phase1/preprocess/ingest_liss4.py) -------- #
   # Drop your band GeoTIFFs and run:
-  #   python -m src.preprocess.ingest_liss4 --config config/config.yaml
+  #   python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
   liss4:
     # LISS-IV bands (B2/B3/B4 = G/R/NIR) — three single-band files OR one stack.
     green: data/raw/liss4/B2.tif
@@ -80,7 +81,7 @@ data:
     stack: null                          # OR one 3-band file; then green/red/nir null
     # ---- labels (Step 1): OSM auto-rasterized = ground-truth road mask ----
     labels: osm                          # osm | none
-    aoi: data/raw/aoi/bangalore_urban.shp  # clips + defines OSM fetch area (null => use image bounds)
+    aoi: data/raw/aoi/blore_urban.shp  # clips + defines OSM fetch area (null => use image bounds)
     network_type: drive                  # osmnx road class
     buffer_m: 4.0                        # road half-width (~1 px at 5.8 m; 3-6 m)
     # ---- optional occlusion prior (PS-minimal: CHM dropped, NDVI proxy) ----
@@ -149,24 +150,46 @@ loss:
   canopy_weight: 0.0  # try 1.0-3.0 to push Occlusion-Recall
 
 train:
-  epochs: 3           # smoke test; raise for real runs
+  epochs: 50          # real run; raise to 40-60. (smoke.yaml stays tiny; CPU dev can lower)
   batch_size: 4       # Mac/MPS: 2-4 | CUDA: 16+
   num_workers: 0      # 0 on macOS/MPS; 4-8 on CUDA/cloud
   lr: 0.001
   weight_decay: 0.0001
   amp: true           # honoured ONLY on CUDA (no-op on MPS/CPU; paired with GradScaler)
+  # ---- LR schedule (stabilises the metric bounce) ----------------------- #
+  # name: none | cosine (smooth decay, + optional linear warmup) | plateau
+  # (ReduceLROnPlateau on the monitored metric). null/none => constant LR.
+  scheduler:
+    name: cosine
+    warmup_epochs: 3        # linear warmup before cosine decay
+    min_lr: 1.0e-6          # cosine floor (also plateau min_lr)
+    plateau_factor: 0.5     # plateau-only: LR *= factor on stall
+    plateau_patience: 5     # plateau-only: epochs to wait before decay
+  # ---- early stopping (monitors eval.monitor; higher-is-better) ---------- #
+  early_stop:
+    enabled: true
+    patience: 12            # stop after N epochs with no improvement
+    min_delta: 0.0          # min metric gain to count as improvement
+  # ---- warm-start (optional) -------------------------------------------- #
+  # Load compatible weights from ANY checkpoint before training (non-strict,
+  # shape-checked: matches copied, mismatches reported & skipped). Point at a
+  # DeepGlobe/RGB-pretrained model to warm-start; init_inflate_stem inflates a
+  # 3-ch RGB stem onto [G,R,NIR,NDVI] (I3D). null => train from initialisation.
+  init_from: null               # e.g. runs/pretrain/<ts>/best.pt
+  init_inflate_stem: true
 
 eval:
   threshold: 0.5          # probability threshold for binarizing predictions
   relax_buffer_px: 3      # tolerance (3-5 px) for relaxed IoU / F1
   monitor: occlusion_recall   # checkpoint selection metric (the headline number)
+  tta: false              # D4-flip test-time augmentation at validation (steadier metric, ~4x val cost)
 
 # =============================================================================
 # Augmentation (occlusion + scale robustness). Pure-NumPy occlusion+scale run now;
 # photometric_geometric needs albumentations (skipped gracefully if absent).
 # =============================================================================
 augment:
-  enabled: false
+  enabled: true       # occlusion + scale (pure-NumPy) always on; photometric needs albumentations
   occlusion:
     enabled: true
     p: 0.5
@@ -175,6 +198,25 @@ augment:
     p: 0.4
     range: [1.0, 2.5]
     mtf_at_nyquist: 0.2     # LISS-IV MTF; tune to the real sensor
+  # road-targeted CoarseDropout: hide patches (biased ONTO roads) to train gap-bridging
+  coarse_dropout:
+    enabled: true
+    p: 0.5
+    max_holes: 6
+    max_frac: 0.12          # max hole side as a fraction of tile size
+    road_bias: 0.8          # P(hole centred on a road pixel) vs anywhere
+  # per-band radiometric jitter (gain/bias in input units; range-safe for DN/reflectance)
+  radiometric:
+    enabled: true
+    p: 0.5
+    gain: 0.1               # per-channel gain ~U(1-gain, 1+gain)
+    bias: 0.05              # per-channel bias ~U(-bias, bias) x band-std
+    noise: 0.0              # optional Gaussian noise x band-std (0 = off)
+  # intra-image road copy-paste (clone road windows to new offsets); off by default
+  copy_paste:
+    enabled: false
+    p: 0.3
+    max_patches: 2
   photometric_geometric:
     enabled: true
     p: 0.5

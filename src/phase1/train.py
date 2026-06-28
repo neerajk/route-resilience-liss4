@@ -77,27 +77,183 @@ def _datasets(cfg: dict, norm):
         val = SyntheticRoadDataset(d.get("val_samples", 16), seed=seed + 10_000,
                                    augment=None, **common)   # never augment validation
         return train, val
+    if d.get("source") == "deepglobe":
+        # ===== DeepGlobe pretraining: 0.5 m RGB degraded to ~5.8 m =====
+        from .data.deepglobe import DeepGlobeDataset
+        dg = d.get("deepglobe", {})
+        common = dict(root=dg["root"], tile_size=size,
+                      source_gsd_m=float(dg.get("source_gsd_m", 0.5)),
+                      target_gsd_m=float(dg.get("target_gsd_m", 5.8)),
+                      sat_suffix=dg.get("sat_suffix", "_sat.jpg"),
+                      mask_suffix=dg.get("mask_suffix", "_mask.png"),
+                      limit=int(dg.get("limit", 0)), norm=norm)
+        train_full = DeepGlobeDataset(augment=aug, **common)
+        val_full = DeepGlobeDataset(augment=None, **common)   # never augment validation
+        vf = float(d.get("cv", {}).get("val_fraction", 0.1))
+        order = list(range(len(train_full)))
+        np.random.RandomState(seed).shuffle(order)
+        n_val = max(1, int(vf * len(order)))
+        va_idx, tr_idx = order[:n_val], order[n_val:]
+        print(f"[train] DeepGlobe: {len(train_full)} pairs -> train={len(tr_idx)} val={len(va_idx)}")
+        return torch.utils.data.Subset(train_full, tr_idx), torch.utils.data.Subset(val_full, va_idx)
     # ===== real LISS-IV tiles (see TileFolderDataset USER INPUT) =====
-    # NOTE: full spatial-block CV (cfg.data.cv) is applied at tiling time
-    # (preprocess); here we use a simple contiguous val split as a fallback.
-    full = TileFolderDataset(root=d["root"], channels=channels, augment=aug, norm=norm)
-    vf = float(d.get("cv", {}).get("val_fraction", 0.2))
-    n_val = max(1, int(vf * len(full)))
-    val = torch.utils.data.Subset(full, range(n_val))
-    train = torch.utils.data.Subset(full, range(n_val, len(full)))
+    # Two dataset views over the SAME tiles: the train view augments, the val view
+    # never does (validation must see clean inputs). CV picks which tiles go where.
+    train_full = TileFolderDataset(root=d["root"], channels=channels, augment=aug, norm=norm)
+    val_full = TileFolderDataset(root=d["root"], channels=channels, augment=None, norm=norm)
+    cv = d.get("cv", {}) or {}
+    scheme = str(cv.get("scheme", "random")).lower()
+    vf = float(cv.get("val_fraction", 0.2))
+    if scheme == "spatial_block":
+        tr_idx, va_idx = _spatial_block_split(
+            train_full.files, float(cv.get("block_size_m", 1500)), vf, seed)
+    else:                                                # random/contiguous fallback
+        n_val = max(1, int(vf * len(train_full)))
+        va_idx, tr_idx = list(range(n_val)), list(range(n_val, len(train_full)))
+        print(f"[train] CV: {scheme} contiguous split -> train={len(tr_idx)} val={len(va_idx)} "
+              f"(WARNING: spatially adjacent tiles can leak; prefer cv.scheme=spatial_block)")
+    train = torch.utils.data.Subset(train_full, tr_idx)
+    val = torch.utils.data.Subset(val_full, va_idx)
     return train, val
 
 
+def _spatial_block_split(files, block_size_m: float, val_fraction: float, seed: int):
+    """Assign WHOLE spatial blocks to train/val (Roberts et al. 2017) to stop the
+    spatial-autocorrelation leak a random/contiguous tile split causes.
+
+    Each tile's ``bounds`` (projected metres, written by ingest_liss4) maps to a
+    block key ``(floor(minx/B), floor(miny/B))``; blocks are shuffled by ``seed``
+    and added to val until ~``val_fraction`` of tiles are covered. Falls back to a
+    contiguous split (with a warning) if any tile lacks ``bounds``.
+    """
+    from collections import defaultdict
+
+    blocks: dict = defaultdict(list)
+    for i, f in enumerate(files):
+        z = np.load(f)
+        if "bounds" not in z.files:
+            n_val = max(1, int(val_fraction * len(files)))
+            print(f"[train] CV: tile {f.name} has no 'bounds' -> falling back to "
+                  f"contiguous split (re-run ingest_liss4 to enable spatial blocking).")
+            return list(range(n_val, len(files))), list(range(n_val))
+        minx, miny = float(z["bounds"][0]), float(z["bounds"][1])
+        blocks[(int(np.floor(minx / block_size_m)), int(np.floor(miny / block_size_m)))].append(i)
+
+    block_keys = sorted(blocks)
+    np.random.RandomState(seed).shuffle(block_keys)
+    target = val_fraction * len(files)
+    val_idx: list = []
+    for k in block_keys:
+        if val_idx and len(val_idx) >= target:
+            break
+        val_idx.extend(blocks[k])
+    val_set = set(val_idx)
+    train_idx = [i for i in range(len(files)) if i not in val_set]
+    print(f"[train] CV: spatial_block ({block_size_m:.0f} m) -> {len(blocks)} blocks, "
+          f"train={len(train_idx)} val={len(val_idx)} tiles (whole blocks held out)")
+    return train_idx, val_idx
+
+
+def load_pretrained(model, path: str, inflate_stem: bool = True) -> dict:
+    """Warm-start: copy compatible weights from ANY checkpoint into ``model``.
+
+    Accepts our own checkpoints (``{"model": state_dict, ...}``), Lightning-style
+    (``{"state_dict": ...}``), or a raw ``state_dict``. Loading is NON-STRICT and
+    shape-checked: only name+shape matches are copied; every mismatch is reported,
+    never fatal — so a partial/foreign checkpoint warm-starts what it can and the
+    rest stays at initialisation.
+
+    If ``inflate_stem`` and the sole mismatch on a 4-D conv weight is the input-
+    channel count with a 3-channel (RGB) source, the stem is inflated via the I3D
+    trick (copy RGB onto the first 3 channels, mean-init the extras, rescale by
+    3/in_ch; cf. ``models.factory.inflate_first_conv``). This is what lets a
+    DeepGlobe/RGB-pretrained model warm-start a [G,R,NIR,NDVI] model.
+
+    Returns a summary dict {loaded, inflated, mismatched, missing}.
+    """
+    if not Path(path).exists():
+        raise FileNotFoundError(f"train.init_from checkpoint not found: {path}")
+    try:
+        obj = torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:  # older torch without weights_only kwarg
+        obj = torch.load(path, map_location="cpu")
+
+    if isinstance(obj, dict) and isinstance(obj.get("model"), dict):
+        src = obj["model"]
+    elif isinstance(obj, dict) and isinstance(obj.get("state_dict"), dict):
+        src = obj["state_dict"]
+    elif isinstance(obj, dict):
+        src = obj                                   # assume a raw state_dict
+    else:
+        raise ValueError(f"Unrecognised checkpoint format at {path}: {type(obj)}")
+    # strip a DataParallel/wrapper prefix if present
+    src = {(k[7:] if k.startswith("module.") else k): v for k, v in src.items()}
+
+    tgt = model.state_dict()
+    to_load: dict = {}
+    inflated: list = []
+    mism: list = []
+    for k, v in src.items():
+        if k not in tgt or not hasattr(v, "shape"):
+            continue
+        tv = tgt[k]
+        if v.shape == tv.shape:
+            to_load[k] = v
+        elif (inflate_stem and v.dim() == 4 and tv.dim() == 4
+              and v.shape[0] == tv.shape[0] and v.shape[2:] == tv.shape[2:]
+              and v.shape[1] == 3 and tv.shape[1] >= 3):
+            in_ch = tv.shape[1]
+            nw = v.new_zeros(tv.shape)
+            nw[:, :3] = v                                   # G,R,NIR <- pretrained RGB
+            if in_ch > 3:                                   # extras <- channel mean
+                nw[:, 3:] = v.mean(dim=1, keepdim=True).repeat(1, in_ch - 3, 1, 1)
+            nw.mul_(3.0 / in_ch)                            # preserve magnitude
+            to_load[k] = nw
+            inflated.append(k)
+        else:
+            mism.append((k, tuple(v.shape), tuple(tv.shape)))
+
+    missing = model.load_state_dict(to_load, strict=False).missing_keys
+    matched = len(to_load) - len(inflated)
+    print(f"[warm-start] {path}")
+    print(f"[warm-start]   loaded {matched} tensors verbatim"
+          + (f" + inflated {len(inflated)} stem conv(s)" if inflated else "")
+          + f" | {len(mism)} shape-mismatch skipped | {len(missing)} model tensors left at init")
+    for k in inflated:
+        print(f"[warm-start]   inflate {k}: RGB(3) -> {tgt[k].shape[1]}ch")
+    for k, s, t in mism[:6]:
+        print(f"[warm-start]   skip {k}: ckpt{s} vs model{t}")
+    if not to_load:
+        print("[warm-start]   WARNING: 0 tensors matched — check the checkpoint matches this arch.")
+    return {"loaded": matched, "inflated": inflated, "mismatched": mism, "missing": missing}
+
+
 @torch.no_grad()
-def _validate(model, loader, device, buffer: int, thr: float):
+def _tta_logits(model, x):
+    """Test-time augmentation: average logits over the D4 flip group
+    {identity, hflip, vflip, rot180}. Exact (flips only — no interpolation), so
+    every view is un-flipped before averaging. Steadier predictions / metric."""
+    acc = None
+    for dims in ((), (-1,), (-2,), (-2, -1)):
+        xi = torch.flip(x, dims=dims) if dims else x
+        li = model(xi)
+        li = torch.flip(li, dims=dims) if dims else li
+        acc = li if acc is None else acc + li
+    return acc / 4.0
+
+
+@torch.no_grad()
+def _validate(model, loader, device, buffer: int, thr: float, tta: bool = False):
     """Headline IoU/Dice/Occlusion-Recall pooled over GLOBAL pixel counts
-    (unbiased); buffered precision/recall/F1/IoU as per-batch means."""
+    (unbiased); buffered precision/recall/F1/IoU as per-batch means.
+    With ``tta`` the model is evaluated under D4-flip test-time augmentation."""
     model.eval()
     tot = {"tp": 0.0, "fp": 0.0, "fn": 0.0, "occ_tp": 0.0, "occ_total": 0.0}
     rel = {"relaxed_precision": 0.0, "relaxed_recall": 0.0, "relaxed_f1": 0.0, "relaxed_iou": 0.0}
     n = 0
     for batch in _pbar(loader, desc="  validating", unit="batch", leave=False):
-        logits = model(batch["image"].to(device)).float().cpu()
+        xb = batch["image"].to(device)
+        logits = (_tta_logits(model, xb) if tta else model(xb)).float().cpu()
         y, c = batch["mask"], batch["canopy"]
         pc = pixel_counts(logits, y, c, thr=thr)
         for k in tot:
@@ -116,6 +272,44 @@ def _validate(model, loader, device, buffer: int, thr: float):
     for k, v in rel.items():
         out[k] = v / max(n, 1)
     return out
+
+
+def _build_scheduler(opt, tr: dict, epochs: int):
+    """Build an LR scheduler from ``cfg.train.scheduler``.
+
+    Returns ``(scheduler, step_mode)`` where step_mode is:
+      - ``"epoch"``   : call ``sched.step()`` once per epoch (cosine),
+      - ``"plateau"`` : call ``sched.step(metric)`` after validation,
+      - ``"none"``    : no scheduler (constant LR — unchanged legacy behaviour).
+
+    Supported ``scheduler.name``: none | cosine (+ optional linear warmup) | plateau.
+    Defaults to ``none`` when the block is absent, so existing configs are unaffected.
+    """
+    sc = tr.get("scheduler") or {}
+    name = str(sc.get("name", "none")).lower()
+    if name in ("none", "", "off", "constant"):
+        return None, "none"
+    min_lr = float(sc.get("min_lr", 1e-6))
+    if name == "plateau":
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            opt, mode="max", factor=float(sc.get("plateau_factor", 0.5)),
+            patience=int(sc.get("plateau_patience", 5)), min_lr=min_lr)
+        return sched, "plateau"
+    if name == "cosine":
+        warm = max(0, int(sc.get("warmup_epochs", 0)))
+        base_lr = float(tr.get("lr", 1e-3))
+        cosine = torch.optim.lr_scheduler.CosineAnnealingLR(
+            opt, T_max=max(1, epochs - warm), eta_min=min_lr)
+        if warm > 0:
+            warmup = torch.optim.lr_scheduler.LinearLR(
+                opt, start_factor=max(min_lr / base_lr, 1e-3), end_factor=1.0,
+                total_iters=warm)
+            sched = torch.optim.lr_scheduler.SequentialLR(
+                opt, [warmup, cosine], milestones=[warm])
+        else:
+            sched = cosine
+        return sched, "epoch"
+    raise ValueError(f"Unknown train.scheduler.name '{name}' (none|cosine|plateau)")
 
 
 def run(cfg: dict) -> Path:
@@ -141,6 +335,9 @@ def run(cfg: dict) -> Path:
 
     print(f"[train] building model '{_m.get('arch')}' ...")
     model = build_model(cfg).to(device)
+    init_from = tr.get("init_from")
+    if init_from:                                    # warm-start from a pretrained ckpt
+        load_pretrained(model, init_from, inflate_stem=bool(tr.get("init_inflate_stem", True)))
     n_par = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[train] datasets: train={len(train_ds)} val={len(val_ds)} | "
           f"batch={int(tr.get('batch_size', 4))} workers={nw} | "
@@ -159,6 +356,16 @@ def run(cfg: dict) -> Path:
     scaler = torch.cuda.amp.GradScaler(enabled=cuda_amp)   # no-op off CUDA
     buffer = int(cfg.get("eval", {}).get("relax_buffer_px", 3))
     thr = float(cfg.get("eval", {}).get("threshold", 0.5))
+    tta = bool(cfg.get("eval", {}).get("tta", False))
+
+    epochs = int(tr.get("epochs", 3))
+    sched, sched_mode = _build_scheduler(opt, tr, epochs)
+    es = tr.get("early_stop") or {}
+    es_on = bool(es.get("enabled", False))
+    es_patience = int(es.get("patience", 0))
+    es_min_delta = float(es.get("min_delta", 0.0))
+    print(f"[train] epochs={epochs} | scheduler={sched_mode if sched else 'none'} | "
+          f"early_stop={'patience=' + str(es_patience) if es_on and es_patience > 0 else 'off'}")
 
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     out = Path(cfg["paths"]["runs"]) / "train" / stamp
@@ -167,9 +374,11 @@ def run(cfg: dict) -> Path:
     history = []
     best_key = cfg.get("eval", {}).get("monitor", "occlusion_recall")
     best_val = -1.0
+    best_ep = 0
+    bad = 0                                              # epochs since last improvement
 
-    epochs = int(tr.get("epochs", 3))
     for ep in range(1, epochs + 1):
+        cur_lr = opt.param_groups[0]["lr"]
         model.train()
         ep_losses = {"total": 0.0, "bce": 0.0, "dice": 0.0, "cldice": 0.0}
         steps = 0
@@ -193,17 +402,33 @@ def run(cfg: dict) -> Path:
                 bar.set_postfix(loss=f"{loss.item():.3f}", cldice=f"{comps['cldice']:.3f}")
         ep_losses = {k: v / max(steps, 1) for k, v in ep_losses.items()}
 
-        val_metrics = _validate(model, val_loader, device, buffer, thr)
-        row = {"epoch": ep, **{f"loss_{k}": v for k, v in ep_losses.items()}, **val_metrics}
+        val_metrics = _validate(model, val_loader, device, buffer, thr, tta=tta)
+        row = {"epoch": ep, "lr": cur_lr,
+               **{f"loss_{k}": v for k, v in ep_losses.items()}, **val_metrics}
         history.append(row)
-        print(f"[ep {ep}/{epochs}] loss={ep_losses['total']:.4f} "
+        cur = val_metrics.get(best_key, -1)
+        print(f"[ep {ep}/{epochs}] lr={cur_lr:.2e} loss={ep_losses['total']:.4f} "
               f"IoU={val_metrics['iou']:.3f} OccRec={val_metrics['occlusion_recall']:.3f} "
               f"relaxedF1={val_metrics['relaxed_f1']:.3f}")
 
-        if val_metrics.get(best_key, -1) > best_val:
-            best_val = val_metrics[best_key]
+        # checkpoint + early-stop bookkeeping (all monitored metrics are higher-better)
+        if cur > best_val + es_min_delta:
+            best_val, best_ep, bad = cur, ep, 0
             torch.save({"model": model.state_dict(), "cfg": cfg, "epoch": ep,
                         "val": val_metrics}, out / "best.pt")
+        else:
+            bad += 1
+
+        # LR schedule step (epoch-wise for cosine; metric-wise for plateau)
+        if sched_mode == "epoch":
+            sched.step()
+        elif sched_mode == "plateau":
+            sched.step(cur)
+
+        if es_on and es_patience > 0 and bad >= es_patience:
+            print(f"[train] early-stop: no {best_key} gain > {es_min_delta} in "
+                  f"{es_patience} epochs (best={best_val:.3f} @ ep {best_ep}).")
+            break
 
     pd.DataFrame(history).to_csv(out / "metrics.csv", index=False)
 
@@ -215,7 +440,11 @@ def run(cfg: dict) -> Path:
     ax.plot(hdf["epoch"], hdf["loss_total"], marker="o", label="total")
     ax.plot(hdf["epoch"], hdf["loss_cldice"], marker="s", label="clDice")
     ax.set_xlabel("epoch"); ax.set_ylabel("loss"); ax.set_title("Training loss")
-    ax.legend()
+    if "lr" in hdf:                                       # LR schedule on a twin axis
+        axr = ax.twinx()
+        axr.plot(hdf["epoch"], hdf["lr"], color="0.6", ls="--", lw=1, label="lr")
+        axr.set_ylabel("lr"); axr.set_yscale("log")
+    ax.legend(loc="upper right")
     save_fig(fig, fig_dir, "loss_curve")
 
     try:
@@ -228,7 +457,7 @@ def run(cfg: dict) -> Path:
     except Exception as e:  # noqa: BLE001 - artifact is best-effort
         print(f"[train] prediction panel skipped ({e})")
 
-    print(f"[train] best {best_key}={best_val:.3f} | artifacts -> {out}")
+    print(f"[train] best {best_key}={best_val:.3f} @ epoch {best_ep} | artifacts -> {out}")
     return out
 
 

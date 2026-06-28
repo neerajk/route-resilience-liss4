@@ -1,0 +1,86 @@
+# =============================================================================
+# rr — DeepGlobe PRETRAINING config (Phase-I Stage A).
+# Trains a 3-channel RGB road model on DeepGlobe images DEGRADED 0.5 m -> 5.8 m
+# (sensor-realistic blur-downsample), to warm-start the LISS-IV model. The output
+# best.pt is consumed by `train.init_from` (stem-inflation maps RGB -> G/R/NIR/NDVI).
+#
+#   python -m src.phase1.pretrain --config config/phase1/pretrain.yaml
+#   # then in config/phase1/config.yaml set:  train.init_from: runs/train/<ts>/best.pt
+#
+# >>> USER INPUT: put the DeepGlobe dataset at data.deepglobe.root (standard layout
+#     <root>/**/<id>_sat.jpg + <id>_mask.png). ~6 GB; not shipped with the repo.
+# =============================================================================
+extends: config.yaml          # inherit scheduler/early-stop/augment/eval machinery
+
+runtime:
+  device: auto
+  seed: 42
+
+data:
+  source: deepglobe
+  channels: [red, green, blue]   # 3-ch RGB (DeepGlobeDataset returns RGB directly)
+  tile_size: 256
+  norm:
+    mean: null                   # RGB already in [0,1]; no standardisation
+    std: null
+  deepglobe:
+    root: data/raw/deepglobe     # >>> USER INPUT: your local DeepGlobe copy
+    sat_suffix: _sat.jpg
+    mask_suffix: _mask.png
+    source_gsd_m: 0.5            # DeepGlobe native GSD
+    target_gsd_m: 5.8            # LISS-IV GSD (degrade target)
+    limit: 0                     # 0 = all pairs; set small (e.g. 50) for a quick test
+  cv:
+    scheme: random               # DeepGlobe tiles are independent scenes -> random split ok
+    val_fraction: 0.1
+
+model:
+  arch: smp
+  in_channels: 3                 # RGB pretrain; warm-start inflates 3 -> 4 for LISS-IV
+  classes: 1
+  decoder: unetplusplus          # match your LISS-IV baseline (or segformer for the advanced path)
+  encoder: resnet34              # keep == target encoder so weights transfer cleanly
+  encoder_weights: imagenet
+  stem_init: smp_default         # already 3-ch; no inflation needed at pretrain time
+
+eval:
+  threshold: 0.5
+  relax_buffer_px: 3
+  monitor: relaxed_f1            # DeepGlobe has NO canopy -> monitor F1 (not occlusion_recall)
+  tta: false
+
+train:
+  epochs: 30
+  batch_size: 16                 # CUDA; lower for CPU/MPS dev
+  num_workers: 4
+  lr: 0.001
+  weight_decay: 0.0001
+  amp: true
+  scheduler:
+    name: cosine
+    warmup_epochs: 2
+    min_lr: 1.0e-6
+  early_stop:
+    enabled: true
+    patience: 8
+
+# DeepGlobe has no canopy -> occlusion augment is meaningless here; the rest apply.
+augment:
+  enabled: true
+  occlusion:
+    enabled: false
+  coarse_dropout:
+    enabled: true
+    p: 0.5
+  radiometric:
+    enabled: true
+    p: 0.5
+  scale:
+    enabled: true
+    p: 0.3
+    range: [1.0, 1.5]            # mild extra GSD jitter on top of the 5.8 m degrade
+  copy_paste:
+    enabled: false
+  photometric_geometric:
+    enabled: true
+    p: 0.5

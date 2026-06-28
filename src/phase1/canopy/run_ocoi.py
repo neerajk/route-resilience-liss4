@@ -3,8 +3,8 @@
 PIPELINE: OSM roads (osmnx) -> Treepedia-style points -> sample CHM(+NDVI) ->
 per-segment OCOI -> save vector + table + a choropleth map + an OCOI histogram.
 
-RUN (after env setup — see README §2 and the run instructions in chat):
-    python -m src.canopy.run_ocoi --config config/config.yaml
+RUN (after env setup — see README §2):
+    python -m src.phase1.canopy.run_ocoi --config config/phase1/config.yaml
 
 NEEDS (USER INPUT in config.yaml):
   - preprocess.aoi_bbox      : [minlon, minlat, maxlon, maxlat]
@@ -24,7 +24,7 @@ from pathlib import Path
 
 def _load_config(path: str) -> dict:
     import yaml
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
@@ -82,7 +82,7 @@ def run(cfg: dict) -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Per-segment OCOI")
-    ap.add_argument("--config", default="config/config.yaml")
+    ap.add_argument("--config", default="config/phase1/config.yaml")
     args = ap.parse_args()
     run(_load_config(args.config))
 

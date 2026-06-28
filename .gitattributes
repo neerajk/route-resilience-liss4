@@ -1,0 +1,38 @@
+# Normalize line endings: store text as LF in the repo and keep LF in the working
+# tree on every OS. Stops the "LF will be replaced by CRLF" warnings on Windows
+# (core.autocrlf) and prevents line-ending-only diffs across contributors.
+
+# Auto-detect text vs binary; text files are normalized to LF on commit.
+* text=auto eol=lf
+
+# Be explicit for the file types in this repo.
+*.py    text eol=lf
+*.pyi   text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.cfg   text eol=lf
+*.toml  text eol=lf
+*.json  text eol=lf
+*.sh    text eol=lf
+*.csv   text eol=lf
+
+# Binary / geospatial assets — never touch line endings.
+*.tif   binary
+*.tiff  binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.npz   binary
+*.npy   binary
+*.pt    binary
+*.ckpt  binary
+*.safetensors binary
+*.shp   binary
+*.shx   binary
+*.dbf   binary
+*.prj   binary
+*.cpg   binary
+*.qmd   binary
+*.pdf   binary

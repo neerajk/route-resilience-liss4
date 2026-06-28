@@ -12,10 +12,17 @@
 #
 # MAC (Apple Silicon): this file installs a PyTorch build with MPS support — good
 #   for dev/smoke. Nothing else to change.
-# NVIDIA GPU box: create the env, then swap in a CUDA PyTorch build, e.g.
+# WINDOWS (CPU dev): the same file works — conda-forge ships the full geo stack
+#   (gdal/rasterio/geopandas/osmnx) for win-64. PyTorch resolves to a CPU build
+#   (there is no MPS on Windows); for NVIDIA on Windows, swap a CUDA build as below.
+#   `conda`/`mamba` work identically to `micromamba` if you prefer them.
+# NVIDIA GPU box (Linux or Windows): create the env, then swap in a CUDA PyTorch
+#   build, e.g.
 #     micromamba run -n rr pip install --force-reinstall torch torchvision \
-#         --index-url https://download.pytorch.org/whl/cu124
-#   (pick the cu1xx matching the box's CUDA). The geo stack is identical on both.
+#         --index-url https://download.pytorch.org/whl/cu128
+#   (pick the cuXXX matching the box's CUDA: cu128 for CUDA 12.8 — and REQUIRED for
+#   Blackwell GPUs / sm_120, e.g. RTX 50-series; older cu124/cu121 otherwise).
+#   The geo stack is identical on all OSes.
 # =============================================================================
 name: rr
 channels:
