@@ -315,13 +315,22 @@ def build_model(cfg: Dict[str, Any]) -> nn.Module:
             "G/R/NIR natively via per-band wavelength + gsd. See METHODOLOGY."
         )
 
+    if arch == "grove":
+        # GROVE arm (Arm B): pluggable backbone (vista_mit|vista_resnet|cswin|
+        # haroadformer) + FPN + seg(+orientation) heads. Lazy import avoids a
+        # cycle (grove imports shared building blocks). Seg-only GROVE returns
+        # plain logits → trains via the existing VISTA trainer; the orientation
+        # head switches the forward to a dict (use src.phase1.grove.train).
+        from ...grove.model import build_grove
+        return build_grove(cfg)
+
     if arch == "vista_v2":
         # VISTA-v2: ResNet-101 + UNet++ (smp) with a PE-pluggable attention
         # bottleneck (botnet | rope) or input sinusoidal PE (sincos) — selected by
         # cfg.model.pe.type. Lazy import keeps smp optional. Returns plain logits,
         # so it trains/predicts through the existing VISTA pipeline unchanged.
-        from ..vista_v2.model import build_vista_v2
+        from ...vista_v2.model import build_vista_v2
         return build_vista_v2(cfg)
 
     raise ValueError(f"Unknown model.arch='{arch}'. "
-                     "Options: miniunet | smp | dinov3 | clay | vista_v2.")
+                     "Options: miniunet | smp | dinov3 | clay | grove | vista_v2.")

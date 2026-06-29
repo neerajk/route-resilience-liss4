@@ -20,7 +20,7 @@ Works on BOTH:
 OUTPUTS (under cfg.paths.runs / 'eda/<timestamp>'):
   eda_report.md · band_statistics.csv · class_balance.csv · figures/*.{pdf,png}
 
-Run:  python -m src.phase1.eda.run_eda --config config/phase1/config.yaml
+Run:  python -m src.phase1.shared.eda.run_eda --config config/phase1/config.yaml
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.dataset import DEFAULT_CHANNELS, SyntheticRoadDataset, TileFolderDataset
-from ...common.viz import save_fig, set_pub_style
+from ....common.viz import save_fig, set_pub_style
 
 
 def _load_config(path: str) -> dict:

@@ -71,20 +71,20 @@ One model class picks the PE from config — so all four variants share code and
 ## 5. How to run (all variants identical)
 ```bash
 # pretrain once on DeepGlobe (shared encoder), then warm-start each variant:
-python -m src.phase1.pretrain --config config/phase1/vista_v2_pretrain.yaml
+python -m src.phase1.vista.pretrain --config config/phase1/vista_v2_pretrain.yaml
 
 # train the four variants — same command, different config:
-python -m src.phase1.train --config config/phase1/vista_v2_botnet.yaml
-python -m src.phase1.train --config config/phase1/vista_v2_rope.yaml
-python -m src.phase1.train --config config/phase1/vista_v2_sincos.yaml
-python -m src.phase1.train --config config/phase1/vista_v2_nope.yaml
+python -m src.phase1.vista.train --config config/phase1/vista_v2_botnet.yaml
+python -m src.phase1.vista.train --config config/phase1/vista_v2_rope.yaml
+python -m src.phase1.vista.train --config config/phase1/vista_v2_sincos.yaml
+python -m src.phase1.vista.train --config config/phase1/vista_v2_nope.yaml
 ```
-Each writes `runs/train/vista_v2-<pe>_liss4_<timestamp>/` with `best.pt` + `metrics.csv`.
+Each writes `runs/train/vista__vista_v2-<pe>__liss4__<ts>/` with `best.pt` + `metrics.csv`.
 
 ## 6. Comparing them (benchmark + statistics + plots)
 ```bash
-python -m src.phase1.vista_v2.bench  --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench
-python -m src.phase1.vista_v2.plots  --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench/figures
+python -m src.phase1.vista_v2.bench  --runs "runs/train/*vista_v2-*" --out runs/vista_v2_bench
+python -m src.phase1.vista_v2.plots  --runs "runs/train/*vista_v2-*" --out runs/vista_v2_bench/figures
 ```
 - **bench** → a table (mean ± 95% CI per PE) + **paired Wilcoxon signed-rank** tests
   across the 7 spatial-block folds (BoTNet vs each other PE), **Holm-corrected**, with

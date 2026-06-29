@@ -14,6 +14,16 @@ runtime:
   device: auto        # auto | mps | cuda | cpu   (auto = CUDA->MPS->CPU)
   seed: 42
 
+# -----------------------------------------------------------------------------
+# ARM — which road-extraction arm this config trains. Drives ALL artifact names
+# (run dirs, pred masks, orientation) via src/common/naming.py so the two arms
+# never overwrite each other. VISTA = this file; GROVE = grove.yaml (extends it).
+# See METHODOLOGY "Two arms: VISTA & GROVE".
+# -----------------------------------------------------------------------------
+arm:
+  name: vista         # vista (visible-surface seg) | grove (occlusion-completion)
+  description: "Visible-surface road segmentation — smp UNet++/SegFormer baseline."
+
 paths:
   runs: runs          # all artifacts (training, EDA, OCOI) written under here
 
@@ -70,9 +80,9 @@ data:
   # Point at the .npz tiles produced by ingest_liss4 (below). >>> USER INPUT <<<
   root: data/tiles
 
-  # ---- LISS-IV ingestion (src/phase1/preprocess/ingest_liss4.py) -------- #
+  # ---- LISS-IV ingestion (src/phase1/shared/preprocess/ingest_liss4.py) - #
   # Drop your band GeoTIFFs and run:
-  #   python -m src.phase1.preprocess.ingest_liss4 --config config/phase1/config.yaml
+  #   python -m src.phase1.shared.preprocess.ingest_liss4 --config config/phase1/config.yaml
   liss4:
     # LISS-IV bands (B2/B3/B4 = G/R/NIR) — three single-band files OR one stack.
     green: data/raw/liss4/B2.tif

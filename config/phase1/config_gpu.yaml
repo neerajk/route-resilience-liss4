@@ -4,7 +4,7 @@
 # USE: real training on a CUDA GPU. Inherits EVERYTHING from config.yaml (model,
 # data, normalization, LR schedule, early-stop, spatial-block CV, augmentation)
 # and overrides only the machine knobs (bigger batch/workers/epochs + AMP).
-#   python -m src.phase1.train --config config/phase1/config_gpu.yaml
+#   python -m src.phase1.vista.train --config config/phase1/config_gpu.yaml
 # device-dynamic: runtime.device=auto picks CUDA automatically.
 #
 # ARCHITECTURE: defaults to the ResNet34 baseline (from config.yaml). To train the

@@ -1,6 +1,6 @@
 # VISTA-v2 · NO PE (control) — ResNet-101 + UNet++, no positional encoding.
 # The benchmark baseline that shows whether any PE helps at all.
-#   python -m src.phase1.train --config config/phase1/vista_v2_nope.yaml
+#   python -m src.phase1.vista.train --config config/phase1/vista_v2_nope.yaml
 extends: vista_v2.yaml
 model:
   pe:

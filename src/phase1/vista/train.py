@@ -1,7 +1,7 @@
 """Phase I training entrypoint — device-dynamic (MPS / CUDA / CPU).
 
 Run (dep-free smoke test on M1):
-    PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.train --config config/phase1/config.yaml
+    PYTORCH_ENABLE_MPS_FALLBACK=1 python -m src.phase1.vista.train --config config/phase1/config.yaml
 
 What it does
 ------------
@@ -27,14 +27,14 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from .data.augment import build_augment
-from .data.dataset import DEFAULT_CHANNELS, SyntheticRoadDataset, TileFolderDataset
-from .losses import CombinedRoadLoss
-from .metrics import pixel_counts, relaxed_iou, relaxed_prf
-from .models import build_model
-from ..common.config import load_config
-from ..common.runtime import amp_autocast, describe_runtime, get_device, set_seed
-from ..common.viz import save_fig, save_prediction_panel, set_pub_style
+from ..shared.data.augment import build_augment
+from ..shared.data.dataset import DEFAULT_CHANNELS, SyntheticRoadDataset, TileFolderDataset
+from ..shared.losses import CombinedRoadLoss
+from ..shared.metrics import pixel_counts, relaxed_iou, relaxed_prf
+from ..shared.models import build_model
+from ...common.config import load_config
+from ...common.runtime import amp_autocast, describe_runtime, get_device, set_seed
+from ...common.viz import save_fig, save_prediction_panel, set_pub_style
 
 
 def _pbar(iterable, **kw):
@@ -79,7 +79,7 @@ def _datasets(cfg: dict, norm):
         return train, val
     if d.get("source") == "deepglobe":
         # ===== DeepGlobe pretraining: 0.5 m RGB degraded to ~5.8 m =====
-        from .data.deepglobe import DeepGlobeDataset
+        from ..shared.data.deepglobe import DeepGlobeDataset
         dg = d.get("deepglobe", {})
         common = dict(root=dg["root"], tile_size=size,
                       source_gsd_m=float(dg.get("source_gsd_m", 0.5)),
@@ -314,29 +314,19 @@ def _build_scheduler(opt, tr: dict, epochs: int):
 
 
 def _run_name(cfg: dict, stamp: str) -> str:
-    """Self-documenting run-dir name: ``<arch>_<stage>_<timestamp>``.
+    """Self-documenting run-dir name: ``<arm>__<model_tag>__<stage>__<timestamp>``.
 
-    arch  : smp -> ``<decoder>-<encoder>`` (e.g. ``segformer-mit_b2``,
-            ``unetplusplus-resnet34``); else the arch name (miniunet / dinov3).
-    stage : data source mapped to a role -> deepglobe→``pretrain``, tiles→``liss4``,
-            synthetic→``synth`` (so pretrained vs trained checkpoints are obvious).
-    e.g.  segformer-mit_b2_pretrain_20260628_123245
-          unetplusplus-resnet34_liss4_20260628_140000
+    arm   : vista | grove (cfg.arm.name) — keeps the two arms' runs separate.
+    model : smp -> ``<decoder>-<encoder>``; else the arch/backbone name.
+    stage : deepglobe→``pretrain``, tiles→``liss4``, synthetic→``synth``.
+    e.g.  vista__segformer-mit_b2__pretrain__20260628_123245
+          grove__ha_roadformer__liss4__20260628_150000
+
+    Delegates to src/common/naming.py (the single source of truth for arm-aware
+    artifact names, shared with predict.py and the GROVE tools).
     """
-    m = cfg.get("model", {})
-    arch = str(m.get("arch", "miniunet")).lower()
-    if arch == "smp":
-        tag = f"{m.get('decoder', 'unet')}-{m.get('encoder', 'enc')}"
-    elif arch == "dinov3":
-        tag = "dinov3"
-    elif arch == "vista_v2":
-        # encode the PE variant so the 4 benchmark runs have distinct, readable dirs
-        tag = f"vista_v2-{(m.get('pe', {}) or {}).get('type', 'botnet')}"
-    else:
-        tag = arch
-    src = cfg.get("data", {}).get("source", "data")
-    stage = {"deepglobe": "pretrain", "tiles": "liss4", "synthetic": "synth"}.get(src, str(src))
-    return f"{tag}_{stage}_{stamp}"
+    from ...common.naming import run_name
+    return run_name(cfg, stamp)
 
 
 def run(cfg: dict) -> Path:

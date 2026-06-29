@@ -1,0 +1,59 @@
+# =============================================================================
+# rr — Phase I · GROVE arm (Arm B): occlusion-completion / roads-under-canopy.
+# -----------------------------------------------------------------------------
+# Inherits EVERYTHING from config.yaml (sensor, data, norm, CV, train) and
+# overrides only the arm identity + GROVE-specific knobs. `extends:` is resolved
+# by src/common/config.py (deep-merge; nearest override wins).
+#
+# STATUS: Stages 0-5 LIVE — naming/contract, supervision, pluggable backbone
+# (vista_mit | vista_resnet | cswin | haroadformer), orientation head, GROVE loss
+# (clDice + under-canopy focal + orientation), optional CoANet refinement.
+# This is the FULL GROVE multi-task config (train with src.phase1.grove.train).
+# For the seg-only BACKBONE BENCHMARK use grove_<backbone>.yaml + the VISTA trainer.
+# =============================================================================
+extends: config.yaml
+
+# ---- arm identity: drives ALL artifact names via src/common/naming.py -------
+# run dirs  -> runs/train/grove__<model_tag>__liss4__<stamp>
+# masks     -> data/grove__pred_mask.tif , data/grove__orientation.tif
+arm:
+  name: grove
+  description: "Occlusion-completion arm — topology/continuity-aware road recovery under canopy."
+
+# ---- model: GROVE pluggable backbone + dual heads (Stages 2-5) --------------
+model:
+  arch: grove                    # selects GroveNet in the shared factory
+  in_channels: 4                 # [G,R,NIR,NDVI] — keep in sync with data.channels
+  classes: 1
+
+grove:
+  # backbone: vista_mit | vista_resnet | cswin | haroadformer
+  backbone: haroadformer
+  heads: [seg, orientation]      # [seg] only = VISTA-compatible logits (use vista trainer)
+  decoder_dim: 128               # FPN width feeding the heads
+  pos_encoding: sincos           # sinusoidal positional encoding on transformer tokens
+
+  # per-backbone knobs (defaults are sensible; override as needed)
+  haroadformer: { dims: [64,128,256,512], depths: [2,2,4,2], window: 7, global_tokens: 8 }
+  cswin:        { dims: [64,128,256,512], depths: [2,2,4,2], stripes: [1,2,7,7] }
+
+  # Stage 5 (optional) — CoANet strip-conv + connectivity refinement
+  coanet:
+    enabled: false               # turn on only if Stage 4 still fragments
+    strip_k: 9
+
+  supervision:
+    enabled: true
+    out_tiles: data/tiles        # augment the tiles ingest_liss4 already wrote (in place)
+    ndvi_thresh: 0.3             # canopy proxy (matches data.liss4.ndvi_thresh)
+    orientation:
+      enabled: true
+      buffer_m: 4.0              # road half-width; match data.liss4.buffer_m
+
+# ---- GROVE multi-task loss (Stage 4) ----------------------------------------
+loss:
+  cldice_iters: 6
+  weights: { bce: 0.3, dice: 0.4, cldice: 0.3 }
+  canopy_weight: 1.5             # upweight BCE on canopy pixels
+  ucr_weight: 2.0                # extra upweight on under_canopy_road (road ∩ canopy)
+  orient_weight: 0.5            # λ on the sin2θ/cos2θ orientation term

@@ -8,7 +8,7 @@ figures (PNG + PDF) via the project's viz styling:
   3. training-curve overlay — val OccRec vs epoch, one line per PE
   4. params/efficiency context (optional, if best.pt present)
 
-RUN:  python -m src.phase1.vista_v2.plots --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench/figures
+RUN:  python -m src.phase1.vista_v2.plots --runs "runs/train/*vista_v2-*" --out runs/vista_v2_bench/figures
 """
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ def render(run_glob: str, out_dir: str):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="VISTA-v2 PE plots")
-    ap.add_argument("--runs", default="runs/train/vista_v2-*_liss4_*")
+    ap.add_argument("--runs", default="runs/train/*vista_v2-*")
     ap.add_argument("--out", default="runs/vista_v2_bench/figures")
     args = ap.parse_args()
     render(args.runs, args.out)

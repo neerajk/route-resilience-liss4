@@ -12,7 +12,7 @@ spatial-block fold), it runs PAIRED statistics across folds:
 HONEST CAVEAT (printed): with ~7 folds, power is low — lead with effect sizes + CIs,
 treat p-values as indicative. Writes benchmark.csv + stats.json for plots.py.
 
-RUN:  python -m src.phase1.vista_v2.bench --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench
+RUN:  python -m src.phase1.vista_v2.bench --runs "runs/train/*vista_v2-*" --out runs/vista_v2_bench
 """
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ def collate(run_glob: str, out_dir: str, default: str = "botnet"):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="VISTA-v2 PE benchmark + stats")
-    ap.add_argument("--runs", default="runs/train/vista_v2-*_liss4_*")
+    ap.add_argument("--runs", default="runs/train/*vista_v2-*")
     ap.add_argument("--out", default="runs/vista_v2_bench")
     ap.add_argument("--default", default="botnet")
     args = ap.parse_args()

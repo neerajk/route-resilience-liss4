@@ -28,6 +28,15 @@ peer-reviewed (preprint/blog/docs) — flagged per project rules.
 - **Wiedemann, Heipke, Mayer, Jamet (1998).** *Empirical evaluation of automatically extracted road axes.* — buffered completeness/correctness (relaxed metrics).
 - **Demir et al. (2018).** *DeepGlobe 2018.* CVPRW. — relaxed road F1 protocol.
 
+## GROVE arm — occlusion completion / roads under canopy (Arm B)
+- **Zhang, Miao, Liu, Tian, Zhou (2022).** *HA-RoadFormer: Hybrid Attention Transformer with Multi-Branch for Large-Scale High-Resolution Dense Road Segmentation.* Mathematics 10(11):1915. — GROVE backbone: **overlapping multi-scale patch embedding** + **linear-complexity hybrid attention** (adjacent 5-diagonal + random); U-Net fusion. Its conclusion names the open gap GROVE fills: *"fuse [road] topology information into neural networks."* https://www.mdpi.com/2227-7390/10/11/1915
+- **Batra, Singh, Reddy, Khan, Chandra, Jawahar (2019).** *Improved Road Connectivity by Joint Learning of Orientation and Segmentation.* CVPR, pp. 10385–10393. — **axial sin(2θ)/cos(2θ) orientation** auxiliary task → connectivity under occlusion (GROVE orientation head).
+- **Mei, Li, Ye, Zhao, Liang, Yang (2021).** *CoANet: Connectivity Attention Network for Road Extraction From Satellite Imagery.* IEEE T-IP 30:8540–8552. — **strip convolution** + **connectivity attention**, explicitly targets **tree/building occlusion** (GROVE Stage 5). https://ieeexplore.ieee.org/document/9563125 · code https://github.com/mj129/CoANet
+- **Dong et al. (2022).** *CSWin Transformer: Cross-Shaped Windows.* CVPR. `[NPR]` arXiv:2107.00652. — optional stripe-attention backbone (matches road geometry). Road use: **DCS-TransUperNet** (Zhang et al., Appl. Sci. 2022, 12(7):3511).
+- **Liu et al. (2021).** *Swin Transformer.* ICCV, pp. 10012–10022. — alternative hierarchical shifted-window backbone.
+- **He et al. (2020).** *Sat2Graph: Road Graph Extraction Through Graph-Tensor Encoding.* ECCV. — graph-level long-gap recovery (GROVE Stage 6 option).
+- **Xu et al. (2022).** *RNGDet: Road Network Graph Detection by Transformer.* IEEE T-GRS. `[NPR]` arXiv:2202.07824. — transformer vertex-by-vertex tracing (long-gap bridge option).
+
 ## Noisy labels / evaluation discipline  (CITATION FIX — two distinct papers)
 - **Mnih & Hinton (2010).** *Learning to Detect Roads in High-Resolution Aerial Images.* ECCV, LNCS pp. 210–223. — road-detection CNN lineage.
 - **Mnih & Hinton (2012).** *Learning to Label Aerial Images from Noisy Data.* ICML. — **noisy OSM-label** justification (omission + registration noise → motivates relaxed/buffered metrics + robust loss). https://icml.cc/2012/papers/318.pdf
