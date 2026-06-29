@@ -1,0 +1,9 @@
+# VISTA-v2 · sinusoidal INPUT PE — 8 sinusoidal coord channels concatenated to
+# [G,R,NGRDI] before the encoder (absolute; the input-level placement). The encoder
+# stem is built for 3+8 channels (smp patches conv1) — documented transfer trade-off.
+#   python -m src.phase1.train --config config/phase1/vista_v2_sincos.yaml
+extends: vista_v2.yaml
+model:
+  pe:
+    type: sincos
+    sincos_freqs: 2          # -> 8 input PE channels

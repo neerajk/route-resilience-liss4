@@ -76,6 +76,23 @@ Full pipeline end-to-end (predict → graph → resilience → dashboard) is in
 | `arch: smp` + `encoder: resnet34` | UNet++ / ResNet (stem-inflated 4-ch) | **baseline** |
 | `arch: smp` + `encoder: mit_b2` | SegFormer / Transformer (attention) | **advanced** |
 | `arch: dinov3` | DINOv3 SAT-493M (timm) | optional |
+| `arch: vista_v2` + `encoder: resnet101` | UNet++ + pluggable PE (botnet/rope/sincos) | **VISTA-v2** |
+
+## VISTA-v2 — ResNet-101 + UNet++ with pluggable positional encoding
+A NIR-free variant on `[Green, Red, NGRDI]` (domain-invariant DeepGlobe↔LISS-IV) that
+benchmarks **three positional encodings** under one model: **BoTNet** relative PE (default)
+and **2-D RoPE** in an attention **bottleneck**, **sinusoidal** PE at the **input**, plus a
+**no-PE control**. Every variant runs with the *same* command — only the config differs.
+Full from-scratch explanation: [`docs/vista_v2.md`](docs/vista_v2.md).
+
+```bash
+python -m src.phase1.pretrain --config config/phase1/vista_v2_pretrain.yaml   # shared DeepGlobe pretrain
+python -m src.phase1.train    --config config/phase1/vista_v2_botnet.yaml      # | rope | sincos | nope
+python -m src.phase1.vista_v2.bench --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench
+python -m src.phase1.vista_v2.plots --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench/figures
+```
+`bench` → mean±95%CI table + paired Wilcoxon (Holm-corrected) + Cohen's d over the 7
+spatial-block folds; `plots` → publication figures (PNG+PDF).
 
 ## Layout
 ```

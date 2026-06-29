@@ -1,0 +1,33 @@
+# =============================================================================
+# rr — VISTA-v2 BASE config (ResNet-101 + UNet++, NIR-free [G,R,NGRDI] input).
+# The 4 PE variants `extends:` this and override ONLY model.pe.type, so every
+# variant runs with the SAME command. See docs/vista_v2.md.
+# =============================================================================
+extends: config.yaml
+
+arm:
+  name: vista
+  description: "VISTA-v2 — ResNet-101 + UNet++ with pluggable positional encoding."
+
+data:
+  channels: [green, red, ngrdi]   # NIR-free, domain-invariant (DeepGlobe ↔ LISS-IV)
+  cv:
+    scheme: spatial_block
+    n_folds: 7                     # raised from 5 for stronger paired stats
+  # NOTE: NIR dropped as a model input. The canopy mask used by Occlusion-Recall +
+  # canopy-weighted loss is the precomputed `canopy` already in the tiles. For a
+  # fresh NIR-free ingest, derive canopy from NGRDI (threshold) instead of NDVI.
+
+model:
+  arch: vista_v2
+  in_channels: 3                   # [G,R,NGRDI]; sincos PE adds channels INTERNALLY
+  classes: 1
+  encoder: resnet101               # the v2 backbone
+  encoder_weights: imagenet
+  pe:
+    type: botnet                   # botnet | rope | sincos | nope  (overridden per variant)
+    heads: 8                       # bottleneck attention heads (botnet/rope)
+    sincos_freqs: 2                # input-PE frequencies (sincos) -> 8 channels
+
+# loss / train / eval inherited from config.yaml (BCE+Dice+clDice, canopy_weight,
+# cosine LR + warmup + early-stop, Occlusion-Recall monitor).

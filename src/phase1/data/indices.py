@@ -48,3 +48,18 @@ def savi(nir: np.ndarray, red: np.ndarray, L: float = 0.5, eps: float = _EPS) ->
     nir = nir.astype(np.float32)
     red = red.astype(np.float32)
     return ((nir - red) / (nir + red + L + eps)) * (1.0 + L)
+
+
+def ngrdi(green: np.ndarray, red: np.ndarray, eps: float = _EPS) -> np.ndarray:
+    """Normalized Green-Red Difference Index = (Green - Red) / (Green + Red).
+
+    RGB-only greenness proxy (a.k.a. GRVI). Used by VISTA-v2 as the 3rd input
+    channel so pretrain (DeepGlobe RGB) and fine-tune (LISS-IV G/R) share an
+    IDENTICAL channel stack [G, R, NGRDI] with NO NIR — a domain-invariant input.
+    Weaker canopy discriminator than NDVI (no NIR), and a deterministic function
+    of G,R (adds no new information, only a ready-made prior + 3-channel shape).
+    Range ~[-1,1]; higher over vegetation (G>R). (Tucker 1979; Motohka et al. 2010)
+    """
+    green = green.astype(np.float32)
+    red = red.astype(np.float32)
+    return (green - red) / (green + red + eps)

@@ -172,6 +172,29 @@ Writes a georeferenced full-scene road GeoTIFF (model + norm read from the check
 
 ---
 
+## 8b. VISTA-v2 — ResNet-101 + UNet++ + pluggable PE  (see `docs/vista_v2.md`)
+NIR-free `[G,R,NGRDI]`; benchmarks 3 PEs + control. Needs `einops` (+ `scipy`/`matplotlib`
+for bench/plots, already in env). Same command for every variant — only the config changes.
+```bash
+pip install einops
+# (optional) shared DeepGlobe pretrain -> warm-start; then set train.init_from in each config:
+python -m src.phase1.pretrain --config config/phase1/vista_v2_pretrain.yaml
+# train the 4 variants (run each across your 7 spatial-block folds):
+python -m src.phase1.train --config config/phase1/vista_v2_botnet.yaml   # relative PE (default)
+python -m src.phase1.train --config config/phase1/vista_v2_rope.yaml     # 2-D RoPE
+python -m src.phase1.train --config config/phase1/vista_v2_sincos.yaml   # sinusoidal at input
+python -m src.phase1.train --config config/phase1/vista_v2_nope.yaml     # control
+# benchmark + publication plots:
+python -m src.phase1.vista_v2.bench --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench
+python -m src.phase1.vista_v2.plots --runs "runs/train/vista_v2-*_liss4_*" --out runs/vista_v2_bench/figures
+```
+Run dirs: `runs/train/vista_v2-<pe>_liss4_<ts>/`. `bench` → mean±95%CI + paired Wilcoxon
+(Holm) + Cohen's d; `plots` → bars/CI, per-fold lines, training curves (PNG+PDF).
+> Caveats: NIR dropped (canopy mask reuses the precomputed tile layer); `sincos` patches the
+> encoder stem for +8 channels; verify DeepGlobe routes `ngrdi` (see pretrain config note).
+
+---
+
 ## 9. Phase 2 — graph (config-driven; clean CLI)
 ```bash
 python -m src.phase2.graph.run_graph --config config/phase2/config_phase2.yaml

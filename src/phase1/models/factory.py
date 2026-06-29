@@ -315,4 +315,13 @@ def build_model(cfg: Dict[str, Any]) -> nn.Module:
             "G/R/NIR natively via per-band wavelength + gsd. See METHODOLOGY."
         )
 
-    raise ValueError(f"Unknown model.arch='{arch}'. Options: miniunet | smp | dinov3 | clay.")
+    if arch == "vista_v2":
+        # VISTA-v2: ResNet-101 + UNet++ (smp) with a PE-pluggable attention
+        # bottleneck (botnet | rope) or input sinusoidal PE (sincos) — selected by
+        # cfg.model.pe.type. Lazy import keeps smp optional. Returns plain logits,
+        # so it trains/predicts through the existing VISTA pipeline unchanged.
+        from ..vista_v2.model import build_vista_v2
+        return build_vista_v2(cfg)
+
+    raise ValueError(f"Unknown model.arch='{arch}'. "
+                     "Options: miniunet | smp | dinov3 | clay | vista_v2.")

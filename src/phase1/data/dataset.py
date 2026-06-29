@@ -71,6 +71,11 @@ def _stack_channels(tile: Dict[str, np.ndarray], channels: Sequence[str]) -> np.
         if ch in ("green", "red", "nir"):
             idx = {"green": 0, "red": 1, "nir": 2}[ch]
             layers.append(tile["bands"][idx])
+        elif ch == "ngrdi":
+            # VISTA-v2 channel: (G-R)/(G+R), computed on-the-fly from bands so no
+            # re-ingest is needed (NIR-free input). See data/indices.py:ngrdi.
+            from .indices import ngrdi as _ngrdi
+            layers.append(_ngrdi(tile["bands"][0], tile["bands"][1]))
         elif ch in tile:
             layers.append(tile[ch])
         else:

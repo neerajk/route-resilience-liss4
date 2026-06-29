@@ -172,6 +172,21 @@ phase consumes only the previous phase's artifact, so work parallelises.
 - **Generalisation:** leave-one-terrain-out (needs ≥2 terrains).
 - Report **mean ± std over spatial-block folds** (Roberts 2017).
 
+### 3a. VISTA-v2 — positional-encoding study  (see [`docs/vista_v2.md`](docs/vista_v2.md))
+**Arch:** ResNet-101 + UNet++ (smp) on NIR-free `[G, R, NGRDI]` (`(G−R)/(G+R)`, a
+domain-invariant DeepGlobe↔LISS-IV input; weaker canopy cue than NDVI — accepted trade-off).
+A PE-pluggable model (`arch: vista_v2`, `model.pe.type`) compares **4 variants under
+identical heads/loss/data**: **botnet** (relative PE, attention bottleneck — *default*),
+**rope** (2-D RoPE, bottleneck), **sincos** (sinusoidal at the **input**; encoder stem
+patched for the +8 channels — a transfer caveat), **nope** (control). PE placement:
+botnet/rope are attention-internal at the **stride-32 bottleneck**; sincos is input-level —
+so the study isolates **PE type *and* location** (relative PEs are translation-robust under
+spatial-block CV; absolute input PE risks tile-overfit — that's the hypothesis).
+**Protocol** (`grove`-style, `vista_v2/bench.py`+`plots.py`): per-fold OccRec over **7
+spatial-block folds** → mean ± 95% CI, **paired Wilcoxon vs botnet, Holm-corrected,
+Cohen's d**. *Caveat:* 7 folds = low power → lead with effect sizes + CIs, p-values
+indicative. Pretrain once on DeepGlobe (`vista_v2_pretrain.yaml`) → warm-start all 4.
+
 ## 4. Status & outstanding  (all four phases merged to `main`)
 - ✅ Phase 1 ingest (OSM labels) + baseline trained on real data (OccRec ≈ 0.39, pre-upgrade).
 - ✅ Phase 1 training stack: **augmentation suite, spatial-block CV, cosine LR + warmup +

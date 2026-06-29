@@ -1,0 +1,19 @@
+# VISTA-v2 · DeepGlobe pretrain (shared) — ResNet-101 + UNet++ on [G,R,NGRDI].
+# Pretrain ONCE (pe: nope = encoder only), then warm-start all 4 fine-tune variants
+# via train.init_from (load_pretrained copies matching weights, skips PE/attention).
+#   python -m src.phase1.pretrain --config config/phase1/vista_v2_pretrain.yaml
+#   # then set in each vista_v2_*.yaml:  train.init_from: runs/train/<ts>/best.pt
+#
+# >>> VERIFY: DeepGlobe is RGB; `ngrdi` must resolve from its green/red bands. If the
+#     deepglobe loader doesn't route channels through data/dataset._stack_channels,
+#     mirror the ngrdi handling there (small change) before running.
+extends: pretrain.yaml
+data:
+  channels: [green, red, ngrdi]
+model:
+  arch: vista_v2
+  in_channels: 3
+  encoder: resnet101
+  encoder_weights: imagenet
+  pe:
+    type: nope

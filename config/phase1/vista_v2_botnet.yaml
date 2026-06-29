@@ -1,0 +1,7 @@
+# VISTA-v2 · BoTNet relative PE (default) — relative PE in the attention bottleneck.
+#   python -m src.phase1.train --config config/phase1/vista_v2_botnet.yaml
+# Run dir -> runs/train/vista__resnet101__liss4__<ts>/
+extends: vista_v2.yaml
+model:
+  pe:
+    type: botnet

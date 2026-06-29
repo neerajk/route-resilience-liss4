@@ -1,0 +1,6 @@
+# VISTA-v2 · 2-D RoPE — rotary relative PE in the attention bottleneck.
+#   python -m src.phase1.train --config config/phase1/vista_v2_rope.yaml
+extends: vista_v2.yaml
+model:
+  pe:
+    type: rope

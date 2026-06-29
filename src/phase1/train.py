@@ -329,6 +329,9 @@ def _run_name(cfg: dict, stamp: str) -> str:
         tag = f"{m.get('decoder', 'unet')}-{m.get('encoder', 'enc')}"
     elif arch == "dinov3":
         tag = "dinov3"
+    elif arch == "vista_v2":
+        # encode the PE variant so the 4 benchmark runs have distinct, readable dirs
+        tag = f"vista_v2-{(m.get('pe', {}) or {}).get('type', 'botnet')}"
     else:
         tag = arch
     src = cfg.get("data", {}).get("source", "data")
