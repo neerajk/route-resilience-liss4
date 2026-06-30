@@ -68,3 +68,4 @@ dependencies:
       - folium>=0.17
       - streamlit-folium>=0.22
       - plotly>=5.20
+      - einops>=0.6.1

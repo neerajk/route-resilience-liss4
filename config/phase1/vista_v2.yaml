@@ -29,5 +29,12 @@ model:
     heads: 8                       # bottleneck attention heads (botnet/rope)
     sincos_freqs: 2                # input-PE frequencies (sincos) -> 8 channels
 
-# loss / train / eval inherited from config.yaml (BCE+Dice+clDice, canopy_weight,
+train:
+  # [G,R,NGRDI] is identical on pretrain AND fine-tune (both 3-ch), so the warm-start
+  # loads the conv1 stem VERBATIM — NO inflation, NO NIR/NDVI added. init_inflate_stem
+  # is a no-op for a 3->3 match; set false to make that explicit.
+  init_from: null            # -> runs/train/<vista_v2 pretrain>/best.pt after Stage A
+  init_inflate_stem: false
+
+# loss / eval inherited from config.yaml (BCE+Dice+clDice, canopy_weight,
 # cosine LR + warmup + early-stop, Occlusion-Recall monitor).

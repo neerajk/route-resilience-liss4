@@ -4,7 +4,9 @@ DeepGlobe pretraining IS ordinary training on the ``deepglobe`` data source: thi
 wrapper just runs ``train.run`` with ``config/phase1/pretrain.yaml`` so the whole
 machinery (loss, LR schedule, early-stop, metrics, checkpointing) is reused. The
 resulting ``runs/train/<ts>/best.pt`` warm-starts the LISS-IV model via
-``train.init_from`` (3-ch RGB → [G,R,NIR,NDVI] stem inflation).
+``train.init_from``. The stem is inflated ONLY if the fine-tune adds input channels
+(3-ch RGB → 4-ch [G,R,NIR,NDVI]); for a matching stack (e.g. vista_v2's 3-ch
+[G,R,NGRDI]) the stem loads verbatim, no inflation.
 
 RUN:
     python -m src.phase1.vista.pretrain --config config/phase1/pretrain.yaml
@@ -28,7 +30,8 @@ def main() -> None:
     print("\n[pretrain] DONE. Warm-start the LISS-IV model by setting in "
           "config/phase1/config.yaml:")
     print(f"           train.init_from: {out / 'best.pt'}")
-    print("           (init_inflate_stem: true maps the 3-ch RGB stem -> [G,R,NIR,NDVI])")
+    print("           Stem: a matching channel count (e.g. vista_v2 [G,R,NGRDI], 3->3) loads")
+    print("           verbatim; only a 3->4 target ([G,R,NIR,NDVI]) needs init_inflate_stem: true.")
 
 
 if __name__ == "__main__":

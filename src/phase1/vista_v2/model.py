@@ -58,7 +58,7 @@ class VistaV2Net(nn.Module):
         if self.attn is not None:
             feats = list(feats)
             feats[-1] = self.attn(feats[-1])
-        dec = self.net.decoder(*feats)
+        dec = self.net.decoder(feats)   # smp>=0.4 takes the feature LIST as one arg (not *unpacked)
         return self.net.segmentation_head(dec)
 
 

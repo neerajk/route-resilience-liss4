@@ -12,7 +12,7 @@ paths:
 graph:
   # ---- INPUT: choose one --------------------------------------------------- #
   # (1) point at a mask GeoTIFF (model output OR a previously-built OSM mask):
-  mask: null                 # e.g. data/pred_mask.tif  OR  runs/graph/<ts>/osm_mask.tif
+  mask: #data/pred_mask.tif                 # e.g. data/pred_mask.tif  OR  runs/graph/<ts>/osm_mask.tif
   # (2) ...or leave mask: null to AUTO-BUILD an OSM mask on this grid (dev):
   make_mask:
     ref_raster: data/raw/liss4/B2.tif       # any GeoTIFF on the target grid (CRS+transform)

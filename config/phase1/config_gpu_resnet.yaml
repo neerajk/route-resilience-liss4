@@ -1,0 +1,24 @@
+# =============================================================================
+# rr — GPU fine-tune for the ResNet34 / UNet++ BASELINE on LISS-IV,
+# warm-started from its OWN DeepGlobe pretrain (resnet pretrain → resnet finetune).
+#   python -m src.phase1.train --config config/phase1/config_gpu_resnet.yaml
+# Inherits the resnet34/unetplusplus model + all features (norm, spatial-block CV,
+# augmentation, scheduler, early-stop) from config.yaml; adds GPU knobs + warm-start.
+# Output run dir auto-names: unetplusplus-resnet34_liss4_<timestamp>
+# =============================================================================
+extends: config.yaml        # config.yaml model is already resnet34 / unetplusplus
+
+runtime:
+  device: auto
+
+train:
+  epochs: 50                # match the SegFormer run for a fair comparison
+  batch_size: 24            # resnet34 is light; raise/lower per VRAM
+  num_workers: 8
+  amp: true
+  # warm-start from the ResNet DeepGlobe pretrain (matches this config's resnet34)
+  init_from: runs/train/unetplusplus-resnet34_pretrain_20260628_231615/best.pt
+  init_inflate_stem: true   # inflate 3-ch RGB stem -> 4-ch [G,R,NIR,NDVI]
+
+loss:
+  cldice_iters: 10          # GPU has memory; full topology term
