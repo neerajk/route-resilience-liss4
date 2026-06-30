@@ -54,10 +54,10 @@ def _stretch(a, p_lo: float = 2, p_hi: float = 98):
 
 def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "prediction",
                           thr: float = 0.5, title: str = "input (false-color)",
-                          rgb_order=(2, 1, 0)) -> None:
+                          rgb_order=(2, 1, 0), band=(0.3, 0.6)) -> None:
     """Qualitative 4-panel figure for ONE sample (the paper's hero visual).
 
-    [ <title> | GT roads | prediction>thr | occlusion overlay ]
+    [ <title> | GT roads | prediction band [lo,hi] | occlusion overlay ]
     The overlay colours under-canopy true road pixels: GREEN = recovered by the
     model, RED = missed — a direct visual read of Occlusion-Recall.
 
@@ -68,6 +68,10 @@ def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "pre
         panel is not hardcoded to one dataset.
     rgb_order : which 3 input channels map to display (R,G,B). Default (2,1,0) gives
         the LISS-IV CIR composite (NIR,R,G); use (1,0,2) for DeepGlobe-style RGB.
+    band : (lo, hi) probability range shown in the prediction panel — highlights the
+        UNCERTAIN zone (lo ≤ p ≤ hi), i.e. roads the model is hedging on (often under
+        canopy), instead of a single hard threshold. Default (0.3, 0.6). The
+        occlusion overlay still uses ``thr`` for the recovered/missed decision.
 
     Args take torch tensors for one example: image [C,H,W], mask [1,H,W] or [H,W],
     canopy [1,H,W] or [H,W], logits [1,H,W] or [1,1,H,W].
@@ -79,7 +83,9 @@ def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "pre
     m = np.asarray(mask.detach().cpu().numpy()).squeeze()
     c = np.asarray(canopy.detach().cpu().numpy()).squeeze()
     prob = torch.sigmoid(logits.detach().float()).cpu().numpy().squeeze()
-    pred = (prob >= thr).astype("float32")
+    pred = (prob >= thr).astype("float32")                       # for the occlusion overlay
+    lo, hi = float(band[0]), float(band[1])
+    band_pred = ((prob >= lo) & (prob <= hi)).astype("float32")  # uncertain-zone view
 
     r, g, b = (idx if idx < img.shape[0] else 0 for idx in rgb_order)   # clamp to available channels
     fcc = np.dstack([_stretch(img[r]), _stretch(img[g]), _stretch(img[b])])
@@ -91,7 +97,7 @@ def save_prediction_panel(image, mask, canopy, logits, out_dir, name: str = "pre
     fig, ax = plt.subplots(1, 4, figsize=(16, 4))
     ax[0].imshow(fcc); ax[0].set_title(title)
     ax[1].imshow(m, cmap="gray"); ax[1].set_title("GT roads")
-    ax[2].imshow(pred, cmap="gray"); ax[2].set_title(f"prediction > {thr}")
+    ax[2].imshow(band_pred, cmap="gray"); ax[2].set_title(f"prediction {lo:g}–{hi:g}")
     ax[3].imshow(overlay); ax[3].set_title("occlusion overlay (G=recovered, R=missed)")
     for a in ax:
         a.set_xticks([]); a.set_yticks([])

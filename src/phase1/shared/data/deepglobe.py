@@ -46,6 +46,25 @@ def _imread(path: Path) -> np.ndarray:
 # DeepGlobe JPEGs decode as R,G,B in this fixed order.
 _DG_SRC_IDX = {"red": 0, "green": 1, "blue": 2}
 
+# Derived RGB indices a channel may request (computed from the [0,1] R,G,B bands).
+# NGRDI = (G-R)/(G+R) is the NIR-free, domain-invariant analogue of NDVI used by the
+# VISTA-v2 [green, red, ngrdi] stack (DeepGlobe has no NIR; NGRDI transfers to LISS-IV).
+_DG_INDEX = {"ngrdi", "vari", "gli", "exg"}
+
+
+def _rgb_index(name: str, r: np.ndarray, g: np.ndarray, b: np.ndarray,
+               eps: float = 1e-6) -> np.ndarray:
+    """Compute a derived RGB vegetation index from [0,1] R,G,B bands."""
+    if name == "ngrdi":
+        return (g - r) / (g + r + eps)                  # Normalized Green-Red Diff. Index
+    if name == "vari":
+        return (g - r) / (g + r - b + eps)              # Visible Atmospherically Resistant
+    if name == "gli":
+        return (2 * g - r - b) / (2 * g + r + b + eps)  # Green Leaf Index
+    if name == "exg":
+        return 2 * g - r - b                            # Excess Green
+    raise KeyError(name)
+
 
 class DeepGlobeDataset(Dataset):
     """DeepGlobe tiles degraded to ``target_gsd_m`` then resized to ``tile_size``.
@@ -80,7 +99,12 @@ class DeepGlobeDataset(Dataset):
         self.mask_suffix = mask_suffix
         self.mtf = float(mtf_at_nyquist)
         self.channels = tuple(channels)
-        self._band_idx = [_DG_SRC_IDX[c] for c in self.channels]   # reorder R,G,B -> requested
+        unknown = [c for c in self.channels if c not in _DG_SRC_IDX and c not in _DG_INDEX]
+        if unknown:
+            raise ValueError(
+                f"DeepGlobeDataset: unknown channel(s) {unknown}. "
+                f"Raw bands: {list(_DG_SRC_IDX)}; derived indices: {sorted(_DG_INDEX)}."
+            )
         self.augment = augment
         self.norm = norm
         # pair each *_sat with its *_mask; skip images that have no mask (valid/test)
@@ -114,20 +138,25 @@ class DeepGlobeDataset(Dataset):
         sat = _imread(sat_p).astype(np.float32)
         if sat.ndim == 2:                                   # grayscale -> 3-ch
             sat = np.repeat(sat[..., None], 3, axis=2)
-        sat = sat[..., :3] / 255.0                          # RGB in [0,1]
-        sat = sat[..., self._band_idx]                      # -> channel order (default G,R,B)
+        sat = sat[..., :3] / 255.0                          # RGB in [0,1] (R,G,B order)
 
         m = _imread(mask_p).astype(np.float32)
         if m.ndim == 3:                                     # RGB mask -> luminance
             m = m[..., :3].mean(axis=2)
         road = (m > 127.5).astype(np.float32)               # white = road
 
-        # degrade RGB to ~5.8 m; mask follows at the same small grid then to tile_size
-        img_ts = self._degrade_resize(sat)                  # [ts,ts,3]
+        # degrade the full RGB to ~5.8 m, then build the requested channels (raw band
+        # OR derived index) in order. Indices are computed AFTER the degrade so they
+        # match the band resolution the model actually sees.
+        rgb_ts = self._degrade_resize(sat)                  # [ts,ts,3] degraded R,G,B
+        r, g, b = rgb_ts[..., 0], rgb_ts[..., 1], rgb_ts[..., 2]
+        layers = [(r, g, b)[_DG_SRC_IDX[ch]] if ch in _DG_SRC_IDX else _rgb_index(ch, r, g, b)
+                  for ch in self.channels]
+        image = np.stack(layers, axis=0).astype(np.float32)  # [C,ts,ts]
+
         small_hw = blur_downsample(road[..., None], self.scale, self.mtf, channel_axis=-1)
         mask_ts = (resize(small_hw[..., 0], (self.ts, self.ts), order=0,
                           preserve_range=True, anti_aliasing=False) > 0.5).astype(np.float32)
 
-        image = np.moveaxis(img_ts, -1, 0)                  # [3,ts,ts]
         canopy = np.zeros((self.ts, self.ts), np.float32)   # no canopy concept here
         return _to_tensors(image, mask_ts, canopy, self.augment, self.norm)

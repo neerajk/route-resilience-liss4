@@ -11,7 +11,7 @@ paths:
 
 resilience:
   # >>> USER INPUT: the Phase 2 graph to analyse:
-  graph: null              # e.g. runs/graph/<ts>/graph.graphml
+  graph: runs/graph/20260629_185121/graph.graphml             # e.g. runs/graph/<ts>/graph.graphml
   weight: travel_time_s    # edge weight: travel_time_s | length_m | null (hop count)
 
   # ---- speed/accuracy knobs (raise for accuracy, lower for speed on big graphs) ----

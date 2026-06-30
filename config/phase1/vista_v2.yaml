@@ -11,6 +11,11 @@ arm:
 
 data:
   channels: [green, red, ngrdi]   # NIR-free, domain-invariant (DeepGlobe ↔ LISS-IV)
+  # 3-ch norm for [green, red, ngrdi] (overrides config.yaml's 4-ch [G,R,NIR,NDVI]).
+  # green/red == band_statistics.csv; ngrdi computed = (green-red)/(green+red) over tiles.
+  norm:
+    mean: [106.059, 95.983, 0.0575]
+    std:  [21.483, 27.295, 0.0493]
   cv:
     scheme: spatial_block
     n_folds: 7                     # raised from 5 for stronger paired stats
@@ -29,5 +34,12 @@ model:
     heads: 8                       # bottleneck attention heads (botnet/rope)
     sincos_freqs: 2                # input-PE frequencies (sincos) -> 8 channels
 
-# loss / train / eval inherited from config.yaml (BCE+Dice+clDice, canopy_weight,
+train:
+  # [G,R,NGRDI] is identical on pretrain AND fine-tune (both 3-ch), so the warm-start
+  # loads the conv1 stem VERBATIM — NO inflation, NO NIR/NDVI added. init_inflate_stem
+  # is a no-op for a 3->3 match; set false to make that explicit.
+  init_from: runs/train/vista__vista_v2-nope__pretrain__20260629_231339/best.pt           # -> runs/train/<vista_v2 pretrain>/best.pt after Stage A
+  init_inflate_stem: false
+
+# loss / eval inherited from config.yaml (BCE+Dice+clDice, canopy_weight,
 # cosine LR + warmup + early-stop, Occlusion-Recall monitor).

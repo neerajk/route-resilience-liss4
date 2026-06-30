@@ -39,11 +39,15 @@ class BottleneckAttention(nn.Module):
                             three=3, heads=self.heads)
         if self.rope is not None:
             q, k = self.rope(q, k, H, W)
-        attn = (q @ k.transpose(-2, -1)) * self.scale
+        # Scores + softmax in fp32: under fp16 AMP, q@kᵀ here can exceed fp16's
+        # ~65504 ceiling -> inf -> NaN (poisons BN running stats permanently, so
+        # the run never recovers). fp32 has the exponent range to stay finite;
+        # we cast the context back to v's dtype for the residual. No-op outside AMP.
+        attn = (q.float() @ k.float().transpose(-2, -1)) * self.scale
         if self.rel is not None:
-            attn = attn + self.rel().unsqueeze(0)        # [1, heads, N, N]
+            attn = attn + self.rel().unsqueeze(0).float()  # [1, heads, N, N]
         attn = attn.softmax(-1)
-        out = rearrange(attn @ v, "b heads n d -> b n (heads d)")
+        out = rearrange((attn @ v.float()).to(v.dtype), "b heads n d -> b n (heads d)")
         out = self.proj(out)
         out = rearrange(out, "b (h w) c -> b c h w", h=H, w=W)
         return x + out                                   # residual
